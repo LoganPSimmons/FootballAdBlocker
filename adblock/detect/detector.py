@@ -71,7 +71,7 @@ class VideoArea:
         rows = np.flatnonzero(self._changed.mean(axis=1) >= 0.3)
         columns = np.flatnonzero(self._changed.mean(axis=0) >= 0.3)
         if len(rows) and len(columns):
-            left, top, right, bottom = 2 * columns[0], 2 * rows[0], 2 * (columns[-1] + 1), 2 * (rows[-1] + 1)
+            left, top, right, bottom = (int(v) for v in (2 * columns[0], 2 * rows[0], 2 * (columns[-1] + 1), 2 * (rows[-1] + 1)))
             aspect = (right - left) / max(1, bottom - top)
             if abs(aspect - 16 / 9) < 0.04 and right - left >= 0.5 * width:  # a 16:9 picture, not a stray animation
                 inset = 3  # stay clear of the seam between video and letterbox
