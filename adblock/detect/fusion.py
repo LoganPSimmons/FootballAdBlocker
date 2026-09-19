@@ -9,15 +9,25 @@ an ad is cheap. So:
   AD -> GAME    after ``exit_ad_frames`` consecutive frames with a graphic present (< 1 s)
   unknown       while in AD, evidence going unknown for ``unknown_grace_s`` drops back to
                 GAME: when we can no longer tell, we show the game
+  flapping      two or more short graphics-free "blips" within two minutes (a halftime show
+                flashing score graphics on and off; real breaks last minutes, not seconds)
+                raise the entry delay to ``calm_enter_ad_s``: sound and picture stop cutting
+                in and out, and the doubt is resolved towards showing. Blips are counted from
+                the evidence, not from our own switches, so damping can't talk itself out
+                of being needed
 
 A viewer correction ("that's an ad" / "that's the game") wins immediately and is *held until
 the evidence agrees with it*; from then on the machine carries on by itself. So a correction
-made a few seconds early or late needs no second click, and "that's the game" during a studio
-show keeps it on screen until the real scorebug is back.
+made a few seconds early or late needs no second click. "Agrees" is deliberately lopsided:
+a forced AD is confirmed by one second without graphics, a forced GAME only by graphics that
+stay for ``agree_game_s`` - during live play the scorebug and corner bug are up for minutes,
+whereas a halftime show flashes score graphics for a few seconds at a time, and releasing
+"that's the game" on one of those would re-hide the show the viewer just asked to see.
 """
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 
 GAME, AD = "GAME", "AD"
@@ -29,6 +39,11 @@ class FusionSettings:
     exit_ad_frames: int = 3
     unknown_grace_s: float = 3.0
     agree_ad_s: float = 1.0  # graphics missing this long = evidence agrees with a forced AD
+    agree_game_s: float = 20.0  # graphics on screen this long without a gap = agrees with a forced GAME
+    blip_max_s: float = 45.0  # graphics gone for enter_ad_s..this long, then back = a blip, not a break
+    flap_blips: int = 2  # this many blips...
+    flap_window_s: float = 120.0  # ...within this long = flapping
+    calm_enter_ad_s: float = 30.0  # entry delay while flapping
 
 
 class Fusion:
@@ -37,8 +52,10 @@ class Fusion:
         self.state = GAME
         self.override: str | None = None  # a viewer correction that the evidence hasn't confirmed yet
         self._present_run = 0
+        self._present_since: float | None = None
         self._absent_since: float | None = None
         self._unknown_since: float | None = None
+        self._blips: deque[float] = deque(maxlen=16)  # when recent short graphics-free stretches ended
 
     def correct(self, state: str) -> None:
         """The viewer says what is on screen right now."""
@@ -50,25 +67,30 @@ class Fusion:
         None: can't tell). Returns the state the app should be in."""
         s = self.settings
         if game_like is None:
-            self._present_run, self._absent_since = 0, None
+            self._present_run, self._present_since, self._absent_since = 0, None, None
             self._unknown_since = t if self._unknown_since is None else self._unknown_since
         elif game_like:
+            if self._absent_since is not None and s.enter_ad_s <= t - self._absent_since < s.blip_max_s:
+                self._blips.append(t)
             self._present_run += 1
+            self._present_since = t if self._present_since is None else self._present_since
             self._absent_since = self._unknown_since = None
         else:
-            self._present_run, self._unknown_since = 0, None
+            self._present_run, self._present_since, self._unknown_since = 0, None, None
             self._absent_since = t if self._absent_since is None else self._absent_since
 
         present = self._present_run >= s.exit_ad_frames
         absent_for = t - self._absent_since if self._absent_since is not None else 0.0
 
         if self.override is not None:
-            agrees = present if self.override == GAME else absent_for >= s.agree_ad_s
+            present_for = t - self._present_since if self._present_since is not None else 0.0
+            agrees = present_for >= s.agree_game_s if self.override == GAME else absent_for >= s.agree_ad_s
             if not agrees:
                 return self.state
             self.override = None  # evidence caught up with the viewer: back to automatic
 
-        if self.state == GAME and absent_for >= s.enter_ad_s:
+        flapping = sum(t - when <= s.flap_window_s for when in self._blips) >= s.flap_blips
+        if self.state == GAME and absent_for >= (s.calm_enter_ad_s if flapping else s.enter_ad_s):
             self.state = AD
         elif self.state == AD and present:
             self.state = GAME

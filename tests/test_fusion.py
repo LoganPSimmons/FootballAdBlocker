@@ -49,6 +49,29 @@ class Automatic(unittest.TestCase):
         self.assertEqual(line.feed(None, 1.0), GAME)
 
 
+class Flapping(unittest.TestCase):
+    def test_halftime_graphics_flashing_on_and_off_stop_toggling_the_state(self):
+        """Live, 2026-09-19 14:32-14:33: five automatic switches in 45 s while the halftime
+        show flashed score graphics - audio cutting in and out."""
+        line = Timeline()
+        line.feed(True, 30)
+        for _ in range(8):  # graphic on for 10 s, off for 15 s, again and again
+            line.feed(False, 15)
+            line.feed(True, 10)
+        switches = sum(a != b for a, b in zip(line.states, line.states[1:]))
+        self.assertLessEqual(switches, 5, "damped after the first few")
+        self.assertEqual(line.states[-1], GAME)
+        self.assertEqual(line.feed(False, 25), GAME, "while flapping, 25 s without graphics is not enough")
+        self.assertEqual(line.feed(False, 10), AD, "a real break is still hidden, just later")
+
+    def test_normal_breaks_are_not_damped(self):
+        line = Timeline()
+        for _ in range(3):  # a break every five minutes is not flapping
+            line.feed(True, 300)
+            self.assertEqual(line.feed(False, 6), AD)
+            line.feed(False, 120)
+
+
 class Corrections(unittest.TestCase):
     def test_early_ad_click_holds_then_hands_back_to_automatic(self):
         line = Timeline()
@@ -68,7 +91,10 @@ class Corrections(unittest.TestCase):
         line.fusion.correct(GAME)
         self.assertEqual(line.feed(False, 120), GAME)  # held for as long as it takes
         self.assertEqual(line.fusion.override, GAME)
-        line.feed(True, 1)
+        line.feed(True, 8)  # a halftime score graphic flashes up for a few seconds...
+        self.assertEqual(line.fusion.override, GAME, "...which must not end the hold")
+        self.assertEqual(line.feed(False, 60), GAME)
+        line.feed(True, 21)  # the real thing: graphics that stay
         self.assertIsNone(line.fusion.override)
         self.assertEqual(line.feed(False, 4), GAME)  # and the next break is detected normally
         self.assertEqual(line.feed(False, 2), AD)
@@ -85,6 +111,7 @@ class Corrections(unittest.TestCase):
         line.feed(True, 1)
         line.fusion.correct(GAME)  # "oops"
         self.assertEqual(line.feed(True, 1), GAME)
+        line.feed(True, 20)
         self.assertIsNone(line.fusion.override)
 
 

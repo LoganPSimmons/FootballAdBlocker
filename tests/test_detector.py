@@ -81,7 +81,7 @@ class SyntheticBroadcast(unittest.TestCase):
         held_from = tv.t
         seen = tv.play(45, scorebug, layout="second half")
         self.assertEqual(seen.override, GAME, "learned by now, but a viewer-seeded region has to earn trust first")
-        seen = tv.play(75, scorebug, layout="second half")
+        seen = tv.play(95, scorebug, layout="second half")
         self.assertEqual(tv.states_between(held_from, tv.t), {GAME})
         self.assertIsNone(seen.override, "new graphics learned from the tagged frames and trusted: automatic again")
 
