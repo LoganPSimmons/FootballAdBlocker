@@ -258,6 +258,23 @@ VRAM** - it can run beside the 4 fps graphics check at 1-2 fps without slowing a
   broadcast" and "commercial", smoothed over several seconds (Logan: a few seconds late is
   fine). Its remaining error - football-looking ads - falls on the cheap side.
 
+**Fused in, with limited powers** (`detect/scene.py`, `fusion.py`): once a second, 9 s causal
+median, no opinion inside a +-0.15 margin. With graphics missing it *vetoes* entering AD
+while the picture still looks like the broadcast; 20 s of uninterrupted "broadcast" ends an
+AD; it can never hide anything; viewer holds listen to graphics only; after a viewer's
+"AD" only graphics or the viewer end that break. Replayed unaided on the halftime session:
+show Logan wanted visible hidden **35.7 s instead of 310.7 s**, 98 % of the halftime
+commercials still covered; the three normal sessions find every break within 0.5 s of the
+graphics-only detector. Next for Phase 5: replace zero-shot by a probe trained on corrected
+labels from several games (kills the football-looking-ad leaks), and measure on another network.
+
+**No per-game training, and a memory** (`detect/memory.py`): graphics are learned unaided in
+the first minutes of every game; those that proved themselves (>= 3 min on screen) are saved
+to `learned/graphics.npz` and start the next session's library. A remembered graphic has no
+on-screen time in the new session, so it can vouch for the game at once but cannot hide
+anything until seen for a minute - stale or wrong-network graphics are harmless. On recorded
+footage: recognised at 0.5 s instead of 61 s.
+
 **What "trained on corrections" means today, honestly:** corrections re-seed the graphics
 learner live and are stored as labels; `evaluate.py` measures any setting against them. No
 learned *classifier* exists yet — that is Phase 5 (embeddings + linear probe), and it needs
@@ -361,7 +378,8 @@ mute + overlay; corrections from the ad screen, control window, tray or hotkey, 
 labels and fed to the learner; PiP thumbnail. *Exit:* a full game hands-off with at most a
 couple of corrections.
 
-**Phase 5 — Learned classifier (and audio only if needed).** Embeddings + linear probe
+**Phase 5 — Learned classifier (and audio only if needed)** — 🟡 **started 2026-09-19:
+zero-shot CLIP measured and fused in with limited powers; the trained probe is still to come.** Embeddings + linear probe
 trained on the recorded sessions, fused into the state machine: faster returns, no false
 entries on graphics/replays, halftime handled. Re-run the evaluator to prove each gain.
 

@@ -33,8 +33,12 @@ and always leaves Chrome unmuted.
 
 How it behaves:
 
-- **First 2–3 minutes: nothing is hidden.** It has to learn the game's graphics (a minute or
-  so) and then see them stay on screen for another minute before their absence means anything. The window's live view shows what it has learned (green = on screen,
+- **No training per game.** It finds each broadcast's graphics by itself while you watch, and it
+  **remembers** the ones that proved themselves (`learned/graphics.npz`), so a network you have
+  watched before is recognised in the first second - only team-specific parts are learned afresh.
+- **First minutes on a network it has never seen: nothing is hidden.** It has to learn the
+  graphics (a minute or so) and see them stay for another minute before their absence means
+  anything. With remembered graphics that shrinks to about a minute. The window's live view shows what it has learned (green = on screen,
   red = missing).
 - Ads are covered and Chrome muted **about 5 s after a break starts** — deliberately slow, so a
   replay or full-screen graphic is never mistaken for an ad. The game is back **within a
@@ -45,10 +49,15 @@ How it behaves:
 - If the picture keeps flipping between graphics and none (a halftime show flashing scores),
   it stops toggling and leans towards showing: hiding then needs 30 s without graphics.
 - **The network's corner logo means "game".** A halftime studio show mostly does *not* carry it
-  (seen on FOX), so to this detector it looks like commercials and gets hidden. Click "That's the
-  GAME" to watch it — that hold survives the show's short score graphics — and "That's an AD"
-  when its commercials start. Telling a studio show from ads is a job for the learned
-  classifier that is still to come.
+  (seen on FOX), so the graphics alone can't tell it from commercials. That is what the optional
+  **image model** is for (below): with it the show stays up and its commercials are hidden.
+  Without it, click "That's the GAME" to watch the show and "That's an AD" for its commercials.
+- **Image model (optional, `requirements-ml.txt`, ~5 GB, uses the GPU a little):** a
+  whole-picture check once a second - does this look like the broadcast or like a commercial?
+  It may *stop* the ad screen from coming up when graphics are missing (studio show, bumper,
+  the first minutes) and, after 20 s, bring the picture back; it can never hide anything, and
+  once you have said "AD" only the real graphics or you end that break. Its weakness is ads
+  that look like football - those leak. Switch: "Use the image model" / `--no-scene`.
 - If it can't see the stream (other tab, minimized, a window size it hasn't learned yet) it
   shows the game rather than guess. Leaving or entering fullscreen makes it learn again for that
   window size, which takes another minute or two of game picture.
@@ -74,7 +83,7 @@ How it behaves:
 | `frames/000000.jpg …` | 640-px-wide JPEGs at ~4 fps (640×360 when the stream is fullscreen), ~35 KB each → roughly 1.5 GB for a 3.5 h game. `--fps 2` halves that. |
 | `frames.csv` | `index,t,wall,file,state,src_w,src_h` — `state` is GAME/AD when the frame was captured |
 | `timeline.jsonl` | one JSON object per line: `session_start`, `state` (with its source: detector, a button, the hotkey), **`correction`**, `hotkey`, `auto`, `overlay` (what it displayed), `overlay_visible` (shown/hidden and why), `window`, `capture`, `recording`, `game`, `relearn`, `session_end`. `t` = seconds since session start; hotkey-driven events carry the **key-press time**, so sort by `t` rather than trusting file order. |
-| `detector.csv` | one row per analysed frame: `t,app_state,detector_state,game_like,override,auto,scores` |
+| `detector.csv` | one row per analysed frame: `t,app_state,detector_state,game_like,override,auto,scores,scene,scene_score` |
 | `graphics/*.png` | what the detector had learned, saved whenever that changed |
 | `session.json` | settings the session was recorded with |
 
@@ -97,6 +106,7 @@ on every game you have watched before they touch a live one.
 ```powershell
 & "C:\Users\Logan\AppData\Local\Programs\Python\Python311\python.exe" -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements-ml.txt   # optional: the image model (PyTorch + CLIP, ~5 GB)
 ```
 
 ## Checks
