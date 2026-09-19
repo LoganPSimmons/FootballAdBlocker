@@ -33,8 +33,8 @@ and always leaves Chrome unmuted.
 
 How it behaves:
 
-- **First 1–2 minutes: nothing is hidden.** It has to see the game's graphics before their
-  absence means anything. The window's live view shows what it has learned (green = on screen,
+- **First 2–3 minutes: nothing is hidden.** It has to learn the game's graphics (a minute or
+  so) and then see them stay on screen for another minute before their absence means anything. The window's live view shows what it has learned (green = on screen,
   red = missing).
 - Ads are covered and Chrome muted **about 5 s after a break starts** — deliberately slow, so a
   replay or full-screen graphic is never mistaken for an ad. The game is back **within a

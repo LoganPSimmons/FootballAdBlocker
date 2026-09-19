@@ -225,6 +225,14 @@ replay, i.e. trade the cheap mistake for the expensive one.
   show the viewer asked for), and two or more 5-45 s graphics-free blips within two minutes
   raise the AD entry delay from 5 s to 30 s. Replayed on the recorded session: one entry and
   one return instead of nine flips.
+- **Cold start:** an instance started during halftime learned the closing highlights
+  package's bottom-left bug - a genuine graphic, persistent across many scenes - the package
+  ended six seconds later, and with nothing else in its library the detector hid the
+  broadcast that followed. Now a graphic's *absence* only counts once it has been on screen
+  for 60 s since it was learned; until then the evidence is "unknown", which never hides
+  anything. (Seed frames must also span >= 5 visibly different scenes, so a locked-off booth
+  or desk shot can't pass its background off as graphics.) Cost: the first break within
+  ~2-3 min of starting the app leaks.
 - Open limit: after "That's the GAME" on a picture with no learned graphic, nothing can end
   the hold, so commercials that follow leak until the viewer says "AD".
 
