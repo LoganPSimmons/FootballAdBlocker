@@ -7,5 +7,8 @@ title_contains = "YouTube TV"
 game = ""                      # e.g. "utah" - which game's score to show on the overlay
 stream_delay_s = 45.0          # spoiler guard: how far YouTube TV runs behind ESPN's feed
 pip = true
+auto = true                    # hide ads automatically; false = you toggle with the hotkey, the detector only watches
+enter_ad_s = 5.0               # graphics missing this long -> ad. Higher = safer for live play, more ad leaks
+exit_ad_frames = 3             # frames with the graphics back -> game (~0.75 s)
 record = true
 fps = 4.0

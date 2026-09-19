@@ -4,9 +4,13 @@ Watch college football on the PC; when an ad break starts, the tool mutes the st
 covers it with a live stats screen (score, win odds, recent plays, box score, other
 games); when the game comes back, it gets out of the way. No more manual mute-and-hide.
 
-Status (2026-09-19): **Phase 0 done** (S1–S3 pass, S4 negative — results below). **Phase 1
-built and passing its end-to-end check**; its exit criterion (a whole game watched with the
-hotkey, labelled session on disk) is the next thing to do — just use it.
+Status (2026-09-19): **Phase 0 done** (S1–S3 pass, S4 negative — results below). Phase 1
+built and tried. Then **Logan changed the order**: instead of labelling whole games by hand
+before any detector exists, the app should hide ads by itself from the start, be corrected with
+one click when wrong, and learn from those corrections. So Phase 3's detector and Phase 4's
+auto mode are **built and running** (section "Auto mode, as built" below), driven from a control
+window + tray icon; the hotkey is now just one of the ways to correct it. What is still ahead:
+the stats dashboard (Phase 2), the learned scene classifier (Phase 5) and polish (Phase 6).
 
 ## Setup this is designed for
 
@@ -151,6 +155,61 @@ live coverage here, so it must not act alone; (2) the persistent-edge learner sh
 the corner network bug as a **separate mask** — ads don't carry it, replays and graphics
 do — which is exactly the veto the scorebug needs.
 
+## Auto mode, as built (2026-09-19)
+
+**Detector** (`adblock/detect/`): `scorebug.py` keeps ~8 min of 1 Hz edge maps and finds the
+pixels whose edges persist *together* (bootstrap from overall frequency, then ≥ 90 % presence
+in the frames matching the first guess); persistent pixels are grouped into **regions scored
+separately** (hits minus noise on persistently quiet pixels). `detector.py` keeps a library
+of every region learned (per picture geometry; nothing is forgotten over a studio show) and
+finds the video area inside a non-fullscreen window from where the picture changes.
+`fusion.py` is the asymmetric state machine: GAME → AD after **5 s** with no learned graphic
+on screen, AD → GAME after **3 frames** (~0.75 s) with one back, and "can't tell" (nothing
+learned yet, other tab, unknown window size, no frames) never hides anything.
+
+Measured on the recorded Utah State @ Utah footage (FOX), replayed through the same code that
+runs live (`tools/evaluate.py`, ~100–230 fps):
+
+- Graphics learned unaided after 60–90 s: the scorebug and the FOX CFB corner bug.
+- Corner bug score: ads ≤ 0.43, live coverage ≥ 0.83 → threshold 0.6.
+- **The scorebug alone was missing in 15 % of live frames** (replays, graphics, a stacked
+  injury-timeout scoreboard), **both graphics together in 0 of 2,679.** The corner bug is
+  what makes a scorebug-presence detector safe; the plan's "absent ≥ 15–20 s regardless" rule
+  is not needed and was not built.
+- All three ad breaks in 37 min of footage found, entered ~5 s after the first ad began
+  (the entry delay), left within 1 s of the broadcast returning — on the return bumper,
+  before the scorebug. FOX network promos (own FOX logo, other position) scored ≤ 0.03.
+  **Game-seconds hidden: 0.**
+
+That is one game on one network: the thresholds are first guesses with healthy margins, not
+tuned values. `evaluate.py --enter-ad/--exit-frames` re-runs any setting over every session.
+
+**Corrections** (the labelling mechanism now): "That's the game — show it" on the ad screen
+itself, "That's an AD" / "That's the GAME" in the control window and tray menu, or F9. A
+correction (1) takes effect at once, (2) is **held until the evidence agrees with it**, then
+automatic detection resumes — so an early or late click needs no second click, (3) is logged
+as a `correction` event with the detector's evidence at that moment — the strong labels;
+the state the viewer let stand is the weak label, (4) steers learning immediately: frames
+after "that's the game" seed the mask, so a changed scorebug layout is picked up within ~30 s
+of the click (covered by `tests/test_detector.py`); frames under a held "AD" are left out.
+
+**Decided with Logan:** the network's corner logo means "game", so the **halftime studio show
+is shown**, not hidden. A learned graphic is therefore never dropped for being on screen
+while the viewer says "AD" — losing the corner bug would bring back false alarms on every
+replay, i.e. trade the cheap mistake for the expensive one.
+
+**What "trained on corrections" means today, honestly:** corrections re-seed the graphics
+learner live and are stored as labels; `evaluate.py` measures any setting against them. No
+learned *classifier* exists yet — that is Phase 5 (embeddings + linear probe), and it needs
+several games of these recordings to be worth training. It is what will handle the cases this
+detector cannot: studio show vs game, a broadcast with no persistent corner logo, ads that
+carry broadcast-like graphics.
+
+Known limits: needs 1–2 min of game picture before it can hide anything (and again after
+leaving/entering fullscreen — masks are pixel-exact per window size); an "AD" said before
+anything is learned can't end by itself (the status line says so); entry is ~5 s late by
+design; all of it is only verified on FOX so far.
+
 ## Phases
 
 Each phase ends with something usable on a real game day.
@@ -230,22 +289,28 @@ Learned while building it:
 intervals, spoiler delay via `wallclock`), game picker, the panels above as a local
 HTML/JS page inside the overlay. *Exit:* ad-mode screen shows live, correctly delayed data.
 
-**Phase 3 — Scorebug detector in shadow mode + evaluator.** Static-edge mask learner,
-matcher, state machine; `evaluate.py` over recorded sessions; live shadow logging against
-your manual toggles. *Exit:* on ≥ 2 recorded games from different networks: game-seconds
-hidden < ~5 per game, > 90 % of ad time covered.
+**Phase 3 — Scorebug detector + evaluator** — 🟡 **built 2026-09-19, pulled forward at
+Logan's request; exit not met yet.** Static-edge mask learner, matcher, state machine;
+`evaluate.py` over recorded sessions. Shadow mode survives as the "Hide ads automatically"
+switch. *Exit:* on ≥ 2 recorded games from different networks: game-seconds hidden < ~5 per
+game, > 90 % of ad time covered. *So far:* one game, FOX only — 0 game-seconds hidden, every
+break found (details in "Auto mode, as built").
 
-**Phase 4 — Auto mode.** Detector drives mute + overlay; hotkey becomes the override; PiP
-thumbnail; overrides logged as labels. *Exit:* a full game hands-off with at most a couple
-of overrides.
+**Phase 4 — Auto mode** — 🟡 **built 2026-09-19; exit needs a full game.** Detector drives
+mute + overlay; corrections from the ad screen, control window, tray or hotkey, logged as
+labels and fed to the learner; PiP thumbnail. *Exit:* a full game hands-off with at most a
+couple of corrections.
 
 **Phase 5 — Learned classifier (and audio only if needed).** Embeddings + linear probe
 trained on the recorded sessions, fused into the state machine: faster returns, no false
 entries on graphics/replays, halftime handled. Re-run the evaluator to prove each gain.
 
 **Phase 6 — Polish.** Auto game identification, auto stream-delay estimate (scorebug clock
-OCR ↔ play-by-play), audio fade instead of hard mute, tray icon + settings, start with
-Chrome, upset / close-game alerts, optional multiview support.
+OCR ↔ play-by-play), audio fade instead of hard mute, ~~tray icon~~ (done with the control
+window) + a settings page, start with Chrome, upset / close-game alerts, optional multiview
+support. Candidates found along the way: carry learned graphics across a fullscreen toggle
+(register the mask in the new geometry instead of re-learning), warm-start from the last
+session's graphics for the same network, use ESPN's "Halftime" status as a prior.
 
 ## Stack
 
@@ -265,21 +330,23 @@ needs distributing.
 
 ```
 FootballAdBlocker/
-  PLAN.md  README.md  run.cmd  requirements.txt  config.example.toml
+  PLAN.md  README.md  start_ui.cmd  run.cmd  requirements.txt  config.example.toml
   adblock/
-    app.py              wires it together: state (GAME/AD), hotkeys, overlay rules, heartbeat
+    app.py              the engine: capture, detector thread, state (GAME/AD), corrections, overlay rules
+    ui.py               control window + tray icon
     capture.py          WgcWindowSource (live) + FileReplaySource (same interface, for the evaluator)
     recorder.py         SessionWriter (on-disk format) + RecordingThread (privacy guard, frame rate)
     hotkeys.py          RegisterHotKey listener          config.py   defaults < config.toml < CLI
-    win32.py            ctypes helpers: find the stream window, rects, capture exclusion
-    detect/             (Phase 3+) scorebug.py · scene.py · audio.py · fusion.py (state machine)
+    win32.py            ctypes helpers: find the stream window, rects, z-order, capture exclusion
+    detect/             scorebug.py (graphics learner + matcher) · fusion.py (state machine + corrections)
+                        · detector.py (pipeline, video area, graphics library) · later: scene.py · audio.py
     actuators/          audio_mute.py · overlay.py
     data/espn.py        scoreboard lookup, per-game poller, spoiler delay
   dashboard/            (Phase 2) index.html · app.js · styles.css
-  tools/                spike_*.py (Phase 0) · smoke_app.py · session_info.py · preview_overlay.py
-                        · unmute_chrome.py · later: evaluate.py · label_review.py
+  tools/                evaluate.py · session_info.py · smoke_app.py · preview_overlay.py · unmute_chrome.py
+                        · spike_*.py (Phase 0) · later: label_review.py
   sessions/             recorded games (git-ignored)      spike_out/   spike evidence (git-ignored)
-  tests/                unittest: hotkeys, session round-trip, ESPN parsing, spoiler delay
+  tests/                unittest: fusion, detector (synthetic broadcast), hotkeys, session round-trip, ESPN
 ```
 
 ## Defaults chosen (change any of these)
