@@ -31,6 +31,7 @@ from adblock.actuators import audio_mute
 from adblock.actuators.overlay import Overlay
 from adblock.capture import WgcWindowSource
 from adblock.data.espn import ScorePoller
+from adblock.detect import memory
 from adblock.detect.detector import AD, GAME, Detector, FusionSettings, Observation
 from adblock.hotkeys import HotkeyError, HotkeyListener
 from adblock.recorder import RecordingThread, SessionWriter
@@ -39,6 +40,8 @@ TICK_MS = 250
 REATTACH_EVERY_S = 2.0
 REMUTE_EVERY_S = 2.0
 NO_FRAMES_S = 2.0  # no analysed frame for this long = the detector can't see the stream
+REMEMBER_EVERY_S = 300.0
+MEMORY_FILE = config_module.ROOT / "learned" / "graphics.npz"
 
 log = logging.getLogger("adblock")
 _console_handler = None  # keeps the ctypes callback alive for the life of the process
@@ -133,7 +136,11 @@ class Controller(QtCore.QObject):
         })
         self.listener.start_and_wait()  # raises HotkeyError if a combination is taken
 
-        self.detector = Detector(FusionSettings(enter_ad_s=config.enter_ad_s, exit_ad_frames=config.exit_ad_frames))
+        remembered = memory.load(MEMORY_FILE)
+        self.detector = Detector(FusionSettings(enter_ad_s=config.enter_ad_s, exit_ad_frames=config.exit_ad_frames), remembered)
+        self.last_remember = time.perf_counter()
+        if remembered:
+            say(f"Remembering {len(remembered)} graphic(s) from earlier sessions: no warm-up for a broadcast seen before.")
         self.observed.connect(self.on_observation)
         self.overlay = Overlay(config.hotkey, config.pip)
         self.overlay.show_game.connect(lambda: self.correct(GAME, "overlay_button"))
@@ -223,6 +230,15 @@ class Controller(QtCore.QObject):
         if self.scores:
             self.scores.start()
         self.log("game", query=query, event_id=event_id, label=self.game_label)
+
+    def remember(self) -> None:
+        """Save the graphics that proved themselves, so the next launch starts warm."""
+        try:
+            proven = self.detector.proven(self.game_label)
+            if proven:
+                memory.save(MEMORY_FILE, memory.merge(memory.load(MEMORY_FILE), proven))
+        except Exception:  # remembering is a convenience; it must never take the app down
+            log.exception("could not save the learned graphics")
 
     def relearn(self) -> None:
         self.detector.relearn()
@@ -349,6 +365,9 @@ class Controller(QtCore.QObject):
                 self.log("window", rect=geometry[0], fullscreen=geometry[1])
             if now - self.observation_at >= NO_FRAMES_S:  # minimized, or the picture froze: can't see the stream
                 self.on_observation(self.detector.unknown(now))
+        if now - self.last_remember >= REMEMBER_EVERY_S:
+            self.last_remember = now
+            self.remember()
         if self.state == AD:
             self.refresh_overlay()
             if now - self.last_remute >= REMUTE_EVERY_S:  # Chrome may open a new audio session mid-break
@@ -364,6 +383,7 @@ class Controller(QtCore.QObject):
         self.closed = True
         self.timer.stop()
         self.set_state(GAME, "shutdown")
+        self.remember()
         self.listener.stop()
         if self.scores:
             self.scores.stop()

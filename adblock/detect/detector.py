@@ -26,8 +26,11 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
+from datetime import date
+
 from adblock.detect import scorebug
 from adblock.detect.fusion import AD, GAME, Fusion, FusionSettings
+from adblock.detect.memory import Remembered
 
 RELEARN_EVERY_S = 30.0
 FORGET_AFTER_S = 45 * 60.0
@@ -124,8 +127,9 @@ class Observation:
 
 
 class Detector:
-    def __init__(self, settings: FusionSettings | None = None) -> None:
+    def __init__(self, settings: FusionSettings | None = None, remembered: list[Remembered] | None = None) -> None:
         self.fusion = Fusion(settings)
+        self.remembered = list(remembered or [])  # graphics proven in earlier sessions (memory.py)
         self.area = VideoArea()
         self._lock = threading.Lock()  # process() runs on the detector thread, correct() on the UI thread
         self._learners: dict[tuple, scorebug.MaskLearner] = {}
@@ -145,12 +149,21 @@ class Detector:
 
     def relearn(self) -> None:
         """Forget everything learned (button in the UI, for when the picture geometry or the
-        broadcast's graphics were misjudged)."""
+        broadcast's graphics were misjudged) - remembered graphics included, for this session."""
         with self._lock:
             self._learners.clear()
             self._library.clear()
             self._last_learn.clear()
+            self.remembered = []
             self.area.forget()
+
+    def proven(self, label: str = "") -> list[Remembered]:
+        """Fullscreen graphics worth remembering: minutes on screen in this session."""
+        with self._lock:
+            today = date.today().isoformat()
+            return [Remembered(key[3], tr.region, tr.seen_s, today, label)
+                    for key, library in self._library.items() if key[2] == (0, 0, key[0], key[1])
+                    for tr in library if tr.seen_s >= FAST_RETURN_S]
 
     def unknown(self, t: float) -> Observation:
         """No usable picture right now (window shows another tab, is minimized, no frames)."""
@@ -171,7 +184,13 @@ class Detector:
         edges = scorebug.edge_map(gray)
         key = (image.shape[1], image.shape[0], rect, edges.shape)
         learner = self._learners.setdefault(key, scorebug.MaskLearner(edges.shape))
-        library = self._library.setdefault(key, [])
+        if key not in self._library:
+            fullscreen_picture = rect == (0, 0, image.shape[1], image.shape[0])
+            # A warm start: remembered graphics join the library with no on-screen time, so
+            # they can vouch for the game at once but their absence means nothing yet.
+            self._library[key] = [TrackedRegion(item.region, t) for item in self.remembered
+                                  if fullscreen_picture and item.shape == edges.shape]
+        library = self._library[key]
 
         flat = edges.reshape(-1)
         for tracked in library:
@@ -221,6 +240,11 @@ class Detector:
                 elif not _ambiguous(learner, region):
                     library[:] = [tr for tr in library if _inside(tr.region.bbox, region.bbox) <= 0.7]  # it replaces its parts
                     library.append(TrackedRegion(region, t, region.score(flat), seeded=mask.seeded))
+        # A tracked graphic can grow (refreshed pixels, bigger box) until it contains what used
+        # to be a neighbour: the part goes, the whole stays.
+        library[:] = [part for part in library
+                      if not any(whole is not part and len(whole.region.on) > len(part.region.on)
+                                 and _inside(part.region.bbox, whole.region.bbox) > 0.7 for whole in library)]
         # Young regions must keep separating the history cleanly; established ones are never
         # purged (the corner bug must survive a 20-minute halftime whatever it looks like there).
         library[:] = [tr for tr in library
