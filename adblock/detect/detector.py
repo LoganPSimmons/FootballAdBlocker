@@ -192,7 +192,8 @@ class Detector:
                 else:
                     library.append(TrackedRegion(region, float(mask.seed_frames), t, region.score(flat)))
         library[:] = [tr for tr in library if t - tr.last_seen < FORGET_AFTER_S]
-        return [tr.region.bbox for tr in library] != before
+        after = [tr.region.bbox for tr in library]  # "changed" = a graphic came or went, not a box that wobbled a pixel
+        return len(after) != len(before) or any(_overlap(a, b) < 0.8 for a, b in zip(after, before))
 
     def picture(self, image: np.ndarray, fullscreen: bool | None = None) -> np.ndarray | None:
         """The analysed picture with the learned graphics drawn in, for the UI."""
