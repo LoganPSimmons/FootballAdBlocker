@@ -179,7 +179,11 @@ What exists (`.\run.cmd --game <team>`, details in README.md):
 - Recorder: WGC frames at ~4 fps (`minimum_update_interval` 240 ms → 4.18 fps measured),
   640 px wide, JPEG q75 ≈ 32–40 KB → ~1.5 GB per 3.5 h game (4 fps chosen over 2 so the
   evaluator can replay the state machine's sub-second rules faithfully; `--fps 2` exists).
-  Saves nothing while the captured window's title isn't the stream's.
+  Saves nothing while the captured window's title isn't the stream's. Checked on a recorded
+  frame: FOX's scorebug is fully legible at that size (scores, `1st 5:35`, play clock, down
+  & distance) — enough for edge matching, and plausibly for the later clock OCR.
+- Cost while recording: ~5 % of one core and ~145 MB, next to Chrome's ~107 % of a core
+  (software video decode, since graphics acceleration is off).
 - Chrome is unmuted on every exit path (quit hotkey, Ctrl+C, console close) and at start-up.
 - `FileReplaySource` replays a session through the live-capture interface;
   `tools/session_info.py` is the first consumer (segments, gaps, label-vs-timeline check,
