@@ -74,6 +74,7 @@ class Controller(QtCore.QObject):
         self.last_attach_try = self.last_remute = 0.0
         self.last_geometry: tuple | None = None
         self.last_shown: tuple[str, str] | None = None
+        self.last_blocker: str | None = None
         self.closed = False
 
         # Claim the hotkeys before anything touches the disk: a second instance, or a key
@@ -144,6 +145,7 @@ class Controller(QtCore.QObject):
         sessions = None
         if state == GAME:
             self.overlay.hide()  # picture first: never keep live play hidden a moment longer
+            self.last_blocker = None  # so the next break logs its overlay_visible afresh
         try:
             sessions = audio_mute.set_muted(state == AD)
         except Exception as exc:  # a COM hiccup must never wedge the state machine
@@ -156,22 +158,30 @@ class Controller(QtCore.QObject):
         latency = f", {1000 * (time.perf_counter() - at):.0f} ms after the key" if at else ""
         say(f"-> {state} ({source}{latency})")
 
-    def overlay_wanted(self) -> bool:
-        """In AD, cover the stream - unless the user has visibly moved on to something else."""
+    def overlay_blocker(self) -> str:
+        """Why the overlay must stay hidden right now; "" means cover the stream.
+
+        In AD the stream is covered unless the user has put something else in front of it.
+        That is decided by z-order, never by focus (see win32.app_window_in_front).
+        """
         if self.state != AD or self.stream is None:
-            return False
+            return "no stream window" if self.state == AD else "not in AD"
         hwnd = self.stream.hwnd
-        if win32.is_minimized(hwnd) or self.config.title_contains.lower() not in win32.window_title(hwnd).lower():
-            return False  # minimized, or that window now shows another tab
-        foreground = win32.foreground_window()
-        if foreground in (0, hwnd, self.overlay.hwnd) or not win32.is_on_screen(foreground):
-            return True
-        # Another app the user can see, on top of the stream's area: get out of its way.
-        # (A window on the other monitor doesn't overlap, so the overlay stays.)
-        return not win32.rects_overlap(win32.window_rect(foreground), win32.window_rect(hwnd))
+        if win32.is_minimized(hwnd):
+            return "stream window is minimized"
+        if self.config.title_contains.lower() not in win32.window_title(hwnd).lower():
+            return "stream window shows another tab"
+        in_front = win32.app_window_in_front(hwnd, ignore=(self.overlay.hwnd,))
+        if in_front:  # exe only - other apps' window titles are none of the timeline's business
+            return f"{win32.process_exe(win32.window_pid(in_front)) or 'another app'} is in front of the stream"
+        return ""
 
     def refresh_overlay(self) -> None:
-        if not self.overlay_wanted():
+        blocker = self.overlay_blocker()
+        if blocker != self.last_blocker:  # the overlay can't be screenshotted: the timeline is its only witness
+            self.last_blocker = blocker
+            self.log("overlay_visible", visible=not blocker, reason=blocker)
+        if blocker:
             self.overlay.hide()
             return
         self.overlay.set_break_seconds(time.perf_counter() - self.break_started)

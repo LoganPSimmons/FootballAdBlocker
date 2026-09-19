@@ -32,6 +32,7 @@ WS_EX_NOACTIVATE = 0x08000000
 WDA_NONE = 0x00
 WDA_EXCLUDEFROMCAPTURE = 0x11
 
+GW_HWNDPREV = 3  # the window above this one in the z-order
 DWMWA_EXTENDED_FRAME_BOUNDS = 9
 DWMWA_CLOAKED = 14
 MONITOR_DEFAULTTONEAREST = 2
@@ -64,6 +65,7 @@ _declare(user32.GetClassNameW, ctypes.c_int, wintypes.HWND, wintypes.LPWSTR, cty
 _declare(user32.GetWindowThreadProcessId, wintypes.DWORD, wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
 _declare(user32.GetWindowRect, wintypes.BOOL, wintypes.HWND, ctypes.POINTER(wintypes.RECT))
 _declare(user32.GetForegroundWindow, wintypes.HWND)
+_declare(user32.GetWindow, wintypes.HWND, wintypes.HWND, wintypes.UINT)
 _declare(user32.MonitorFromWindow, wintypes.HMONITOR, wintypes.HWND, wintypes.DWORD)
 _declare(user32.GetMonitorInfoW, wintypes.BOOL, wintypes.HMONITOR, ctypes.POINTER(MONITORINFO))
 _declare(user32.GetWindowLongPtrW, ctypes.c_ssize_t, wintypes.HWND, ctypes.c_int)
@@ -164,8 +166,32 @@ def is_on_screen(hwnd: int) -> bool:
     return bool(user32.IsWindowVisible(hwnd)) and not is_minimized(hwnd) and not is_cloaked(hwnd)
 
 
-def rects_overlap(a: Rect, b: Rect) -> bool:
-    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+def overlap_size(a: Rect, b: Rect) -> tuple[int, int]:
+    """Width and height of the intersection of two rects (0, 0 when they don't intersect)."""
+    width = min(a[2], b[2]) - max(a[0], b[0])
+    height = min(a[3], b[3]) - max(a[1], b[1])
+    return (width, height) if width > 0 and height > 0 else (0, 0)
+
+
+def app_window_in_front(hwnd: int, ignore: tuple[int, ...] = (), min_overlap: int = 100) -> int:
+    """The first ordinary application window stacked *above* ``hwnd`` that covers part of it, or 0.
+
+    Z-order, not focus, is what says the user has put something in front of the stream: the
+    foreground window can be invisible (GameInputSvc), or be the desktop - which spans every
+    monitor yet sits behind everything. Topmost and tool windows are skipped: widgets, OSDs
+    and our own overlay float above Chrome without meaning the user has moved on.
+    """
+    target = window_rect(hwnd)
+    above = user32.GetWindow(hwnd, GW_HWNDPREV)
+    for _ in range(2000):  # the z-order can change under us; never walk forever
+        if not above:
+            return 0
+        if above not in ignore and is_on_screen(above) and not window_ex_style(above) & (WS_EX_TOPMOST | WS_EX_TOOLWINDOW):
+            width, height = overlap_size(window_rect(above), target)
+            if width >= min_overlap and height >= min_overlap:
+                return above
+        above = user32.GetWindow(above, GW_HWNDPREV)
+    return 0
 
 
 def is_cloaked(hwnd: int) -> bool:

@@ -43,10 +43,17 @@ class GameSnapshot:
     short_name: str  # "USU @ UTAH"
     state: str  # "pre" | "in" | "post"
     status_detail: str  # "10:37 - 1st", "Halftime", "Final"
+    period: int  # 1-4, 5+ in overtime, 0 before kickoff
+    clock: float  # seconds left in the period
     away: TeamScore
     home: TeamScore
     network: str  # "FOX", or "" if ESPN doesn't list one
     fetched_at: float  # time.time() when ESPN answered
+
+    @property
+    def progress(self) -> tuple[int, int, float]:
+        """Orders snapshots of one game by how far the game has got (bigger = later)."""
+        return ({"pre": 0, "in": 1, "post": 2}.get(self.state, 1), self.period, -self.clock)
 
     def score_line(self) -> str:
         def side(team: TeamScore) -> str:
@@ -74,7 +81,8 @@ def _snapshot(event: dict, fetched_at: float) -> GameSnapshot:
     teams = [_team(c) for c in competition["competitors"]]
     home = next((t for t in teams if t.home), teams[0])
     away = next((t for t in teams if not t.home), teams[-1])
-    status = (event.get("status") or competition.get("status") or {}).get("type", {})
+    full_status = event.get("status") or competition.get("status") or {}
+    status = full_status.get("type", {})
     networks = [name for b in competition.get("broadcasts") or [] for name in b.get("names") or []]
     return GameSnapshot(
         event_id=str(event["id"]),
@@ -82,6 +90,8 @@ def _snapshot(event: dict, fetched_at: float) -> GameSnapshot:
         short_name=event.get("shortName", ""),
         state=status.get("state", ""),
         status_detail=status.get("shortDetail") or status.get("detail", ""),
+        period=int(full_status.get("period") or 0),
+        clock=float(full_status.get("clock") or 0.0),
         away=away,
         home=home,
         network=networks[0] if networks else "",
@@ -145,6 +155,7 @@ class ScorePoller(threading.Thread):
         self._history: deque[GameSnapshot] = deque(maxlen=64)  # 64 * 20 s: far longer than any delay
         self._lock = threading.Lock()
         self._halt = threading.Event()  # not "_stop": threading.Thread uses that name internally
+        self._stale_in_a_row = 0
 
     def stop(self) -> None:
         self._halt.set()
@@ -154,6 +165,21 @@ class ScorePoller(threading.Thread):
         with self._lock:
             history = list(self._history)
         return next((s for s in reversed(history) if s.fetched_at <= cutoff), None)
+
+    def accept(self, snapshot: GameSnapshot) -> bool:
+        """Add a snapshot unless it would move the game backwards.
+
+        ESPN's CDN sometimes answers a later request with an older cached state (seen
+        2026-09-19: "End of 1st" followed by "0:04 - 1st" 40 s later). A few of those in a
+        row are dropped; a long run means the *earlier* data was the glitch, so give in.
+        """
+        with self._lock:
+            if self._history and snapshot.progress < self._history[-1].progress and self._stale_in_a_row < 6:
+                self._stale_in_a_row += 1
+                return False
+            self._stale_in_a_row = 0
+            self._history.append(snapshot)
+            return True
 
     def run(self) -> None:
         client = EspnClient()
@@ -169,9 +195,7 @@ class ScorePoller(threading.Thread):
                         else:
                             event_id, self.game_name = game.event_id, game.name
                     if event_id:
-                        snapshot = client.game(event_id)
-                        with self._lock:
-                            self._history.append(snapshot)
+                        self.accept(client.game(event_id))
                         self.status = ""
                 except (httpx.HTTPError, KeyError, ValueError) as exc:  # offline, or ESPN changed shape
                     self.status = f"ESPN unavailable ({type(exc).__name__})"

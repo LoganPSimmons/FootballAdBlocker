@@ -6,7 +6,7 @@ import unittest
 from adblock.data import espn
 
 
-def event(event_id, away, home, state="in", detail="10:37 - 1st", network="FOX"):
+def event(event_id, away, home, state="in", detail="10:37 - 1st", network="FOX", period=1, clock=637.0):
     def competitor(team, side):
         location, name, abbreviation, score, rank = team
         return {"homeAway": side, "score": score, "curatedRank": {"current": rank},
@@ -14,7 +14,7 @@ def event(event_id, away, home, state="in", detail="10:37 - 1st", network="FOX")
 
     return {
         "id": event_id, "name": f"{away[0]} {away[1]} at {home[0]} {home[1]}", "shortName": f"{away[2]} @ {home[2]}",
-        "status": {"type": {"state": state, "shortDetail": detail}},
+        "status": {"period": period, "clock": clock, "type": {"state": state, "shortDetail": detail}},
         "competitions": [{"competitors": [competitor(home, "home"), competitor(away, "away")],
                           "broadcasts": [{"market": "national", "names": [network]}]}],
     }
@@ -63,6 +63,33 @@ class SpoilerDelay(unittest.TestCase):
             snapshot = espn._snapshot(event("1", ("A", "a", "AAA", "0", 99), ("B", "b", "BBB", score, 99)), now - age)
             poller._history.append(snapshot)
         self.assertEqual(poller.current().home.score, "7")  # the 14 is only 10 s old: not yet
+
+
+class NeverBackwards(unittest.TestCase):
+    TEAMS = (("A", "a", "AAA", "0", 99), ("B", "b", "BBB", "7", 99))
+
+    def snap(self, period, clock, state="in"):
+        return espn._snapshot(event("1", *self.TEAMS, state=state, period=period, clock=clock), time.time())
+
+    def test_progress_orders_a_game(self):
+        order = [self.snap(0, 0, "pre"), self.snap(1, 900), self.snap(1, 4), self.snap(1, 0), self.snap(2, 900),
+                 self.snap(4, 0), self.snap(5, 0), self.snap(4, 0, "post")]
+        self.assertEqual(sorted(order, key=lambda s: s.progress), order)
+
+    def test_stale_cdn_answer_is_dropped(self):
+        poller = espn.ScorePoller("a")
+        self.assertTrue(poller.accept(self.snap(1, 4)))
+        self.assertTrue(poller.accept(self.snap(1, 0)))  # "End of 1st"
+        self.assertFalse(poller.accept(self.snap(1, 4)))  # older cache node answers: ignored
+        self.assertTrue(poller.accept(self.snap(1, 0)))  # same state again is fine
+        self.assertTrue(poller.accept(self.snap(2, 890)))
+        self.assertEqual([s.clock for s in poller._history], [4, 0, 0, 890])
+
+    def test_gives_in_when_the_earlier_data_was_the_glitch(self):
+        poller = espn.ScorePoller("a")
+        poller.accept(self.snap(4, 0, "post"))  # a bogus "Final"
+        results = [poller.accept(self.snap(2, 300)) for _ in range(7)]
+        self.assertEqual(results, [False] * 6 + [True])
 
 
 if __name__ == "__main__":
