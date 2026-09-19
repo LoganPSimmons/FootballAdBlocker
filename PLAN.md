@@ -236,6 +236,28 @@ replay, i.e. trade the cheap mistake for the expensive one.
 - Open limit: after "That's the GAME" on a picture with no learned graphic, nothing can end
   the hold, so commercials that follow leak until the viewer says "AD".
 
+**Whole-image classifier, measured on today's recordings** (`tools/explore_classifier.py`,
+CLIP ViT-B/32 via open_clip, one frame per second, RTX 3060 Ti: **10.6 ms per frame, 890 MB
+VRAM** - it can run beside the 4 fps graphics check at 1-2 fps without slowing anything):
+
+- *Zero-shot* (text prompts, no training) against labels that are certain (a learned graphic
+  on screen = broadcast; deep inside a verified break = ad): 97-99 % per frame; after a 9 s
+  median it calls the broadcast an ad 0-1.75 % of the time and an ad the broadcast 0-9 %.
+  What fools it is what one would fear: **ads that look like football** (an advocacy spot
+  shot in a stadium, an NFL-themed ad, a "FOX College Football Friday" promo).
+- *Linear probe* on the embeddings, trained on first-half sessions, tested on the held-out
+  second half: 99.8 % after a 5 s median, 0 % of ads called broadcast. Same game, stadium
+  and network though - says nothing yet about another game.
+- **Halftime, where the graphics detector is blind:** on the session with Logan's 9 clicks,
+  zero-shot would have shown 99.0 % of what he wanted shown (the studio show) and hidden
+  93.0 % of what he wanted hidden (its commercials). The probe did badly there only because
+  my automatic reference labels called the studio show an ad - train it on his corrected
+  labels instead.
+- So the two signals are complementary, as planned: graphics on screen = game (certain,
+  sub-second, no training); graphics missing = the image model decides between "still the
+  broadcast" and "commercial", smoothed over several seconds (Logan: a few seconds late is
+  fine). Its remaining error - football-looking ads - falls on the cheap side.
+
 **What "trained on corrections" means today, honestly:** corrections re-seed the graphics
 learner live and are stored as labels; `evaluate.py` measures any setting against them. No
 learned *classifier* exists yet — that is Phase 5 (embeddings + linear probe), and it needs
