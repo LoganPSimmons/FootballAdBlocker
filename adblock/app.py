@@ -76,17 +76,19 @@ class Controller(QtCore.QObject):
         self.last_shown: tuple[str, str] | None = None
         self.closed = False
 
-        self.overlay = Overlay(config.hotkey, config.pip)
-        self.writer = SessionWriter(config.sessions_path, config.label or config.game or "session",
-                                    config.fps, config.frame_width, config.jpeg_quality) if config.record else None
-        self.scores = ScorePoller(config.game, config.stream_delay_s) if config.game else None
-
+        # Claim the hotkeys before anything touches the disk: a second instance, or a key
+        # another program owns, must fail without leaving an empty session folder behind.
         self.hotkey.connect(self.on_hotkey)
         self.listener = HotkeyListener({
             config.hotkey: lambda at: self.hotkey.emit("toggle", at),
             config.quit_hotkey: lambda at: self.hotkey.emit("quit", at),
         })
         self.listener.start_and_wait()  # raises HotkeyError if a combination is taken
+
+        self.overlay = Overlay(config.hotkey, config.pip)
+        self.writer = SessionWriter(config.sessions_path, config.label or config.game or "session",
+                                    config.fps, config.frame_width, config.jpeg_quality) if config.record else None
+        self.scores = ScorePoller(config.game, config.stream_delay_s) if config.game else None
 
         if self.writer:
             self.writer.start(app_version=__version__, hotkey=config.hotkey, title_contains=config.title_contains,
