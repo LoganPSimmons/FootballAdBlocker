@@ -4,7 +4,9 @@ Watch college football on the PC; when an ad break starts, the tool mutes the st
 covers it with a live stats screen (score, win odds, recent plays, box score, other
 games); when the game comes back, it gets out of the way. No more manual mute-and-hide.
 
-Status: **Phase 0 done** (2026-09-19: S1–S3 pass, S4 negative — results below). Phase 1 in progress.
+Status (2026-09-19): **Phase 0 done** (S1–S3 pass, S4 negative — results below). **Phase 1
+built and passing its end-to-end check**; its exit criterion (a whole game watched with the
+hotkey, labelled session on disk) is the next thing to do — just use it.
 
 ## Setup this is designed for
 
@@ -157,10 +159,44 @@ Each phase ends with something usable on a real game day.
 S1–S4. *Exit met:* PNGs of the game captured from Chrome (windowed + fullscreen); the
 overlay-covered capture kept updating for 60 s; Chrome mutes/unmutes from a script.
 
-**Phase 1 — One-key ad mode + recorder.** Global hotkey toggles AD mode: mute Chrome, show
-the overlay (placeholder: score + break timer). Recorder writes frames + toggle timeline to
-`sessions/<date>_<game>/`. *Exit:* a full game watched using only the hotkey — already
-better than mute-and-hide — and a labeled session on disk.
+**Phase 1 — One-key ad mode + recorder** — 🟡 **built 2026-09-19; exit needs a full game.**
+Global hotkey toggles AD mode: mute Chrome, show the overlay (placeholder: score + break
+timer). Recorder writes frames + toggle timeline to `sessions/<date>_<label>/`. *Exit:* a
+full game watched using only the hotkey — already better than mute-and-hide — and a labeled
+session on disk.
+
+What exists (`.\run.cmd --game <team>`, details in README.md):
+
+- `RegisterHotKey` listener on its own thread: **F9** toggles, **Ctrl+Shift+F9** quits.
+  Measured with Chrome fullscreen and focused: key → muted + overlay in **46 ms**, key →
+  game back in **14 ms**.
+- Overlay = the exact window recipe S2 validated, showing break timer, ESPN score held back
+  by the spoiler delay (45 s, simple snapshot ageing until Phase 2's per-play `wallclock`),
+  and — **pulled forward from Phase 4 — the live PiP thumbnail**: without it the viewer
+  can't tell when the game is back, so the "back to GAME" labels would be late and useless.
+- The overlay yields only to a *visible* foreground window that overlaps the stream; it stays
+  put for windows on the other monitor.
+- Recorder: WGC frames at ~4 fps (`minimum_update_interval` 240 ms → 4.18 fps measured),
+  640 px wide, JPEG q75 ≈ 32–40 KB → ~1.5 GB per 3.5 h game (4 fps chosen over 2 so the
+  evaluator can replay the state machine's sub-second rules faithfully; `--fps 2` exists).
+  Saves nothing while the captured window's title isn't the stream's.
+- Chrome is unmuted on every exit path (quit hotkey, Ctrl+C, console close) and at start-up.
+- `FileReplaySource` replays a session through the live-capture interface;
+  `tools/session_info.py` is the first consumer (segments, gaps, label-vs-timeline check,
+  contact sheet per key press). `tools/smoke_app.py` runs the real app end to end with
+  injected key presses (16 checks, all pass); its sessions are marked `SYNTHETIC_LABELS`.
+
+Learned while building it:
+
+- **An invisible system window can own the foreground.** `GameInputSvc.exe` (SYSTEM) held it
+  with a hidden 136×39 window for minutes while fullscreen Chrome was being watched. Any
+  rule keyed on "the foreground window" must ignore windows that aren't visible. Side effect:
+  Windows silently drops *injected* input in that state (UIPI) — physical keys are fine, only
+  the smoke test has to wait for a normal foreground window.
+- **The player's own controls dim the bottom of the picture** for ~3 s after any mouse
+  movement — exactly where FOX puts the scorebug. The scorebug matcher has to tolerate that.
+- The very first synthetic "ad" window happened to contain a **Big 12 promo made of football
+  highlights with no scorebug** — the predicted hard case is common, not hypothetical.
 
 **Phase 2 — Stats dashboard.** ESPN client (scoreboard + summary poller, gzip, polite
 intervals, spoiler delay via `wallclock`), game picker, the panels above as a local
@@ -201,17 +237,21 @@ needs distributing.
 
 ```
 FootballAdBlocker/
-  PLAN.md
+  PLAN.md  README.md  run.cmd  requirements.txt  config.example.toml
   adblock/
-    capture.py          live frame source + FileReplaySource (same interface, for the evaluator)
-    detect/             scorebug.py · scene.py · audio.py · fusion.py (state machine)
+    app.py              wires it together: state (GAME/AD), hotkeys, overlay rules, heartbeat
+    capture.py          WgcWindowSource (live) + FileReplaySource (same interface, for the evaluator)
+    recorder.py         SessionWriter (on-disk format) + RecordingThread (privacy guard, frame rate)
+    hotkeys.py          RegisterHotKey listener          config.py   defaults < config.toml < CLI
+    win32.py            ctypes helpers: find the stream window, rects, capture exclusion
+    detect/             (Phase 3+) scorebug.py · scene.py · audio.py · fusion.py (state machine)
     actuators/          audio_mute.py · overlay.py
-    data/espn.py        scoreboard + summary poller, spoiler delay
-    recorder.py  hotkeys.py  app.py
-  dashboard/            index.html · app.js · styles.css
-  tools/                spike_*.py · evaluate.py · label_review.py
-  sessions/             recorded games (git-ignored)
-  tests/
+    data/espn.py        scoreboard lookup, per-game poller, spoiler delay
+  dashboard/            (Phase 2) index.html · app.js · styles.css
+  tools/                spike_*.py (Phase 0) · smoke_app.py · session_info.py · preview_overlay.py
+                        · unmute_chrome.py · later: evaluate.py · label_review.py
+  sessions/             recorded games (git-ignored)      spike_out/   spike evidence (git-ignored)
+  tests/                unittest: hotkeys, session round-trip, ESPN parsing, spoiler delay
 ```
 
 ## Defaults chosen (change any of these)
