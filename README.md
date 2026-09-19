@@ -41,6 +41,9 @@ How it behaves:
   second** of the broadcast returning, usually on the return bumper, before the scorebug.
 - A correction takes effect immediately and is **held until the picture agrees with it**, then
   automatic detection carries on. Clicking a few seconds early or late needs no second click.
+  ("Agrees" = no graphics for a second after "AD"; graphics that *stay* for 20 s after "GAME".)
+- If the picture keeps flipping between graphics and none (a halftime show flashing scores),
+  it stops toggling and leans towards showing: hiding then needs 30 s without graphics.
 - **The network's corner logo means "game"**, so the halftime studio show is shown, not hidden
   (it carries the same logo). Say "That's an AD" if you don't want it; that holds until the real
   commercials start.

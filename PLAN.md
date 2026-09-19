@@ -219,6 +219,12 @@ replay, i.e. trade the cheap mistake for the expensive one.
 - **Labels:** corrections are applied backwards (`adblock/labels.py`): undoing a detector
   switch relabels the whole stretch since that switch; an "AD" on a missed break is
   back-dated to where the graphics vanished. `evaluate.py` scores against these.
+- **Flapping:** a show that flashes score graphics on and off made the state flip five times
+  in 45 s (sound cutting in and out). Two fixes in `fusion.py`: a forced GAME is released
+  only after graphics have *stayed* for 20 s (a 10 s highlight graphic no longer re-hides the
+  show the viewer asked for), and two or more 5-45 s graphics-free blips within two minutes
+  raise the AD entry delay from 5 s to 30 s. Replayed on the recorded session: one entry and
+  one return instead of nine flips.
 - Open limit: after "That's the GAME" on a picture with no learned graphic, nothing can end
   the hold, so commercials that follow leak until the viewer says "AD".
 
