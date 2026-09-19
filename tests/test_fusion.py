@@ -89,6 +89,43 @@ class Flapping(unittest.TestCase):
             line.feed(False, 120)
 
 
+class ImageModel(unittest.TestCase):
+    """The scene opinion may veto hiding and slowly bring the picture back - nothing else."""
+
+    def feed(self, line, game_like, scene, seconds):
+        for _ in range(int(seconds * FPS)):
+            line.states.append(line.fusion.update(game_like, line.t, scene=scene))
+            line.t += 1 / FPS
+        return line.states[-1]
+
+    def test_studio_show_without_graphics_is_not_hidden(self):
+        line = Timeline()
+        line.feed(True, 30)
+        self.assertEqual(self.feed(line, False, True, 120), GAME, "no logo, but it still looks like the broadcast")
+        self.assertEqual(self.feed(line, False, False, 1), AD, "commercials: hidden at once, the 5 s were long over")
+
+    def test_it_can_never_hide_anything_by_itself(self):
+        line = Timeline()
+        self.assertEqual(self.feed(line, True, False, 300), GAME, "graphics on screen: its opinion is irrelevant")
+        self.assertEqual(self.feed(line, None, False, 300), GAME, "nothing learned yet: 'looks like an ad' hides nothing")
+
+    def test_return_needs_twenty_seconds_so_a_stadium_ad_cannot_reopen_a_break(self):
+        line = Timeline()
+        line.feed(True, 30)
+        self.feed(line, False, False, 30)
+        self.assertEqual(self.feed(line, False, True, 15), AD, "a 15 s football-looking ad")
+        self.feed(line, False, False, 30)
+        self.assertEqual(self.feed(line, False, True, 21), GAME, "the studio show is back, and stays")
+
+    def test_a_viewers_ad_hold_listens_to_graphics_only(self):
+        line = Timeline()
+        line.feed(True, 30)
+        line.fusion.correct(AD)  # "hide this", over a football-looking ad the model believes in
+        self.assertEqual(self.feed(line, False, True, 60), AD)
+        self.assertIsNone(line.fusion.override, "graphics were missing: the hold was confirmed at once")
+        self.assertEqual(line.feed(True, 1), GAME, "and the real game still comes back within a second")
+
+
 class Corrections(unittest.TestCase):
     def test_early_ad_click_holds_then_hands_back_to_automatic(self):
         line = Timeline()

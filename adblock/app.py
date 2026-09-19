@@ -31,7 +31,7 @@ from adblock.actuators import audio_mute
 from adblock.actuators.overlay import Overlay
 from adblock.capture import WgcWindowSource
 from adblock.data.espn import ScorePoller
-from adblock.detect import memory
+from adblock.detect import memory, scene as scene_module
 from adblock.detect.detector import AD, GAME, Detector, FusionSettings, Observation
 from adblock.hotkeys import HotkeyError, HotkeyListener
 from adblock.recorder import RecordingThread, SessionWriter
@@ -88,15 +88,16 @@ class DetectorThread(threading.Thread):
     """Runs every captured frame through the detector. Like the recorder it never looks at
     the window while it shows another tab: that is reported as "can't see the stream"."""
 
-    def __init__(self, source: WgcWindowSource, detector: Detector, hwnd: int, title_contains: str, emit) -> None:
+    def __init__(self, source: WgcWindowSource, detector: Detector, hwnd: int, title_contains: str, emit, scene_opinion) -> None:
         super().__init__(name="detector", daemon=True)
         self.source, self.detector, self.hwnd, self.needle, self.emit = source, detector, hwnd, title_contains.lower(), emit
+        self.scene_opinion = scene_opinion  # () -> True / False / None, from the image model if there is one
 
     def run(self) -> None:
         for frame in self.source:
             try:
                 if self.needle in win32.window_title(self.hwnd).lower():
-                    seen = self.detector.process(frame.image, frame.t, win32.is_fullscreen(self.hwnd))
+                    seen = self.detector.process(frame.image, frame.t, win32.is_fullscreen(self.hwnd), self.scene_opinion())
                 else:
                     seen = self.detector.unknown(frame.t)
             except Exception:  # a bad frame must not end detection for the rest of the game
@@ -139,6 +140,13 @@ class Controller(QtCore.QObject):
         remembered = memory.load(MEMORY_FILE)
         self.detector = Detector(FusionSettings(enter_ad_s=config.enter_ad_s, exit_ad_frames=config.exit_ad_frames), remembered)
         self.last_remember = time.perf_counter()
+        self.use_scene = config.scene
+        self.scene: scene_module.SceneWatcher | None = None
+        if scene_module.available():
+            self.scene = scene_module.SceneWatcher(self.stream_picture)
+            self.scene.start()  # loads the model in the background; verdicts start a few seconds later
+        elif config.scene:
+            say("Image model not installed (requirements-ml.txt): running on graphics only.")
         if remembered:
             say(f"Remembering {len(remembered)} graphic(s) from earlier sessions: no warm-up for a broadcast seen before.")
         self.observed.connect(self.on_observation)
@@ -178,7 +186,8 @@ class Controller(QtCore.QObject):
         self.source = WgcWindowSource(stream.hwnd, min_interval_ms=max(50, int(1000 / self.config.fps) - 10))
         if self.writer:
             RecordingThread(self.source, self.writer, lambda: self.state, stream.hwnd, self.config.title_contains).start()
-        DetectorThread(self.source, self.detector, stream.hwnd, self.config.title_contains, self.observed.emit).start()
+        DetectorThread(self.source, self.detector, stream.hwnd, self.config.title_contains, self.observed.emit,
+                       self.scene_opinion).start()
         self.observation_at = time.perf_counter()
         self.log("capture", status="acquired", hwnd=stream.hwnd, title=stream.title)
         say(f"Watching Chrome window {stream.hwnd:#x}: {stream.title!r}")
@@ -216,6 +225,22 @@ class Controller(QtCore.QObject):
             self.log("auto", enabled=auto)
             say(f"Automatic detection {'on' if auto else 'off (the detector only watches)'}")
 
+    def stream_picture(self):
+        """The newest frame of the stream for the image model - never of another tab."""
+        if not (self.source and self.stream) or self.config.title_contains.lower() not in win32.window_title(self.stream.hwnd).lower():
+            return None
+        frame = self.source.latest()
+        return frame.image if frame is not None else None
+
+    def scene_opinion(self) -> bool | None:
+        return self.scene.verdict() if self.scene and self.use_scene else None
+
+    def set_scene(self, enabled: bool) -> None:
+        if enabled != self.use_scene:
+            self.use_scene = enabled
+            self.log("scene", enabled=enabled)
+            say(f"Image model {'on' if enabled else 'off'}")
+
     def set_pip(self, enabled: bool) -> None:
         self.config.pip = enabled
         self.overlay.set_pip_enabled(enabled)
@@ -249,7 +274,8 @@ class Controller(QtCore.QObject):
     def on_observation(self, seen: Observation) -> None:
         self.observation, self.observation_at = seen, time.perf_counter()
         if self.writer:
-            self.writer.add_detection(seen.t, self.state, seen.state, seen.game_like, seen.override, self.auto, seen.scores)
+            self.writer.add_detection(seen.t, self.state, seen.state, seen.game_like, seen.override, self.auto, seen.scores,
+                                      seen.scene, self.scene.latest() if self.scene else None)
             if seen.learned and self.source and (frame := self.source.latest()) is not None and self.stream:
                 picture = self.detector.picture(frame.image, win32.is_fullscreen(self.stream.hwnd))
                 if picture is not None:
@@ -338,7 +364,15 @@ class Controller(QtCore.QObject):
         if seen.game_like is None:
             return "Can't see the stream right now (other tab, minimized, or a new window size being learned)."
         graphics = f"{seen.on_screen} of {len(seen.scores)} learned graphics on screen"
-        return f"{'Automatic' if self.auto else 'Manual - the detector only watches'}: {graphics}."
+        return f"{'Automatic' if self.auto else 'Manual - the detector only watches'}: {graphics}.{self.scene_status()}"
+
+    def scene_status(self) -> str:
+        if not (self.scene and self.use_scene):
+            return ""
+        if not self.scene.ready:
+            return " Image model: loading."
+        opinion = self.scene.verdict()
+        return " Image model: " + ("looks like the broadcast." if opinion else "looks like a commercial." if opinion is False else "undecided.")
 
     def preview(self):
         """The analysed picture with the learned graphics drawn in (BGR), or the plain frame, or None."""
@@ -387,6 +421,8 @@ class Controller(QtCore.QObject):
         self.listener.stop()
         if self.scores:
             self.scores.stop()
+        if self.scene:
+            self.scene.stop()
         if self.source:
             self.source.stop()
         if self.writer:
@@ -409,6 +445,7 @@ def parse_args(argv: list[str]) -> tuple[config_module.Config, argparse.Namespac
     parser.add_argument("--no-auto", dest="auto", action="store_false", default=None, help="detector only watches; you toggle")
     parser.add_argument("--no-record", dest="record", action="store_false", default=None)
     parser.add_argument("--no-pip", dest="pip", action="store_false", default=None)
+    parser.add_argument("--no-scene", dest="scene", action="store_false", default=None, help="graphics only, no image model")
     parser.add_argument("--headless", action="store_true", help="no control window or tray icon: hotkeys only")
     parser.add_argument("--duration", type=float, help="quit by itself after this many seconds (for testing)")
     args = parser.parse_args(argv)

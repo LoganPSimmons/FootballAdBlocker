@@ -20,6 +20,7 @@ class Config:
     stream_delay_s: float = 45.0  # spoiler guard: show ESPN data only once it is this old
     pip: bool = True  # small live thumbnail on the overlay, to see when the game is back
     auto: bool = True  # the detector drives GAME/AD; off = it only watches (shadow mode) and you toggle
+    scene: bool = True  # also use the image model (needs requirements-ml.txt; ignored if not installed)
     enter_ad_s: float = 5.0  # broadcast graphics missing this long -> AD (higher = safer for live play)
     exit_ad_frames: int = 3  # consecutive frames with graphics back -> GAME (~0.75 s at 4 fps)
     record: bool = True

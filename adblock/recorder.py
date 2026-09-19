@@ -7,7 +7,7 @@ Every game watched becomes a labelled dataset as a side effect of using the hotk
     timeline.jsonl    one JSON object per line: session_start, hotkey, state, window, capture, session_end
     frames.csv        index,t,wall,file,state,src_w,src_h   (state = app state when the frame was captured)
     frames/000000.jpg ...
-    detector.csv      t,app_state,detector_state,game_like,override,auto,scores   (one row per analysed frame)
+    detector.csv      t,app_state,detector_state,game_like,override,auto,scores,scene,scene_score   (one row per analysed frame)
     graphics/*.png    what the detector had learned, saved whenever that changed
 
 Labels. ``state`` is what the viewer was shown and let stand - a weak label (they may not have
@@ -37,7 +37,7 @@ from adblock import win32
 from adblock.capture import FrameSource
 
 FRAME_COLUMNS = ["index", "t", "wall", "file", "state", "src_w", "src_h"]
-DETECTOR_COLUMNS = ["t", "app_state", "detector_state", "game_like", "override", "auto", "scores"]
+DETECTOR_COLUMNS = ["t", "app_state", "detector_state", "game_like", "override", "auto", "scores", "scene", "scene_score"]
 
 
 def slugify(text: str) -> str:
@@ -112,14 +112,16 @@ class SessionWriter:
         return True
 
     def add_detection(self, at: float, app_state: str, detector_state: str, game_like: bool | None,
-                      override: str | None, auto: bool, scores: list[float]) -> None:
+                      override: str | None, auto: bool, scores: list[float],
+                      scene: bool | None = None, scene_score: float | None = None) -> None:
         """One analysed frame's evidence. Flushed every few seconds - it is a lot of tiny rows."""
         with self._lock:
             if self._detector_file.closed:
                 return
             self._detector.writerow([self.seconds(at), app_state, detector_state,
                                      "" if game_like is None else int(game_like), override or "", int(auto),
-                                     " ".join(f"{score:.2f}" for score in scores)])
+                                     " ".join(f"{score:.2f}" for score in scores),
+                                     "" if scene is None else int(scene), "" if scene_score is None else f"{scene_score:.2f}"])
             self._detector_rows += 1
             if self._detector_rows % 20 == 0:
                 self._detector_file.flush()

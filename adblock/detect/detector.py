@@ -118,6 +118,7 @@ class Observation:
     scores: list[float] = field(default_factory=list)  # one per tracked region
     boxes: list[Rect] = field(default_factory=list)  # their boxes, in 640-px analysis space
     on_screen: int = 0  # how many of the tracked graphics are on screen right now
+    scene: bool | None = None  # the image model's opinion that went into this decision
     video_rect: Rect | None = None  # where the video is inside the captured frame
     learned: bool = False  # the graphics library changed on this frame
 
@@ -171,15 +172,15 @@ class Detector:
             self._last_t = t
             return Observation(t, self.fusion.update(None, t), None, self.fusion.override)
 
-    def process(self, image: np.ndarray, t: float, fullscreen: bool | None = None) -> Observation:
+    def process(self, image: np.ndarray, t: float, fullscreen: bool | None = None, scene: bool | None = None) -> Observation:
         with self._lock:
-            return self._process(image, t, fullscreen)
+            return self._process(image, t, fullscreen, scene)
 
-    def _process(self, image: np.ndarray, t: float, fullscreen: bool | None) -> Observation:
+    def _process(self, image: np.ndarray, t: float, fullscreen: bool | None, scene: bool | None) -> Observation:
         elapsed, self._last_t = min(1.0, max(0.0, t - self._last_t)), t
         rect = self.area.locate(image, t, fullscreen)
         if rect is None:
-            return Observation(t, self.fusion.update(None, t), None, self.fusion.override)
+            return Observation(t, self.fusion.update(None, t, scene=scene), None, self.fusion.override, scene=scene)
         gray = scorebug.analysis_gray(image, rect)
         edges = scorebug.edge_map(gray)
         key = (image.shape[1], image.shape[0], rect, edges.shape)
@@ -209,7 +210,7 @@ class Detector:
             game_like = False
         else:
             game_like = None
-        state = self.fusion.update(game_like, t, strong)
+        state = self.fusion.update(game_like, t, strong, scene)
 
         learner.add(gray, edges, t, self._tag(t))
         learned = False
@@ -217,7 +218,7 @@ class Detector:
             self._last_learn[key] = t
             learned = self._learn(learner, library, t, flat)
         return Observation(t, state, game_like, self.fusion.override, [tr.score for tr in library],
-                           [tr.region.bbox for tr in library], sum(tr.present for tr in library), rect, learned)
+                           [tr.region.bbox for tr in library], sum(tr.present for tr in library), scene, rect, learned)
 
     def _tag(self, t: float) -> int:
         """What the viewer's latest correction says about the current frame, if anything."""

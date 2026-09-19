@@ -29,7 +29,10 @@ import numpy as np  # noqa: E402
 
 from adblock.capture import FileReplaySource  # noqa: E402
 from adblock.labels import effective_labels  # noqa: E402
+from collections import deque  # noqa: E402
+
 from adblock.detect.detector import Detector, FusionSettings  # noqa: E402
+from adblock.detect.scene import SMOOTH_S, verdict_from  # noqa: E402
 
 
 def clock(seconds: float) -> str:
@@ -47,7 +50,25 @@ def recorded_evidence(session: Path) -> list[tuple[float, bool | None]]:
         return [(float(r["t"]), None if r["game_like"] == "" else r["game_like"] == "1") for r in csv.DictReader(handle)]
 
 
-def replay(session: Path, settings: FusionSettings, with_corrections: bool = False, raw_labels: bool = False) -> list[dict]:
+_scene_model = None
+
+
+def scene_scores(session: Path) -> list[tuple[float, float]]:
+    """(t, image-model score) once a second, from the embeddings tools/explore_classifier.py cached."""
+    global _scene_model
+    cache = ROOT / "learned" / "embeddings" / f"{session.name}.npz"
+    if not cache.exists():
+        raise SystemExit(f"no cached embeddings for {session.name}: run tools\explore_classifier.py on it first")
+    if _scene_model is None:
+        from adblock.detect.scene import SceneModel
+
+        _scene_model = SceneModel()
+    data = np.load(cache, allow_pickle=False)
+    return [(float(t), _scene_model.score_embedding(e)) for t, e in zip(data["t"], data["embedding"])]
+
+
+def replay(session: Path, settings: FusionSettings, with_corrections: bool = False, raw_labels: bool = False,
+           scene: bool = False) -> list[dict]:
     """One dict per recorded frame: t, label, detector state, evidence.
 
     Unaided by default - what the detector does on its own. ``with_corrections`` also replays
@@ -67,10 +88,14 @@ def replay(session: Path, settings: FusionSettings, with_corrections: bool = Fal
 
     detector = Detector(settings)
     rows = []
+    pending = scene_scores(session) if scene else []
+    recent: deque[float] = deque(maxlen=SMOOTH_S)  # causal, like the live SceneWatcher
     for frame in source:
         while clicks and clicks[0][0] <= frame.t:
             detector.correct(clicks.pop(0)[1])
-        seen = detector.process(frame.image, frame.t, fullscreen_at(frame.t))
+        while pending and pending[0][0] <= frame.t:
+            recent.append(pending.pop(0)[1])
+        seen = detector.process(frame.image, frame.t, fullscreen_at(frame.t), verdict_from(recent) if scene else None)
         rows.append({"t": frame.t, "index": frame.index, "label": frame.label, "state": seen.state,
                      "game_like": seen.game_like, "best": seen.best, "regions": len(seen.scores), "learned": seen.learned})
     if not raw_labels:  # corrections say the stretch leading up to them was wrong: apply them backwards
@@ -113,9 +138,9 @@ def contact_sheet(session: Path, rows: list[dict], moments: list[float], path: P
 
 
 def evaluate(session: Path, settings: FusionSettings, t_from: float, t_to: float, sheet: bool,
-             with_corrections: bool, raw_labels: bool) -> dict:
+             with_corrections: bool, raw_labels: bool, scene: bool = False) -> dict:
     started = time.perf_counter()
-    rows = replay(session, settings, with_corrections, raw_labels)
+    rows = replay(session, settings, with_corrections, raw_labels, scene)
     took = time.perf_counter() - started
     scored = [r for r in rows if t_from <= r["t"] <= t_to]
     steps = np.diff([r["t"] for r in scored], append=scored[-1]["t"]).clip(0, 1.0)  # seconds each frame stands for
@@ -152,6 +177,8 @@ def main() -> int:
     parser.add_argument("--sheet", action="store_true", help="write detector_transitions.jpg into each session")
     parser.add_argument("--enter-ad", type=float, default=FusionSettings.enter_ad_s)
     parser.add_argument("--exit-frames", type=int, default=FusionSettings.exit_ad_frames)
+    parser.add_argument("--scene", action="store_true",
+                        help="fuse in the image model (needs requirements-ml.txt and cached embeddings)")
     parser.add_argument("--raw-labels", action="store_true",
                         help="score against the recorded state as is, without applying corrections backwards")
     parser.add_argument("--with-corrections", action="store_true",
@@ -165,7 +192,8 @@ def main() -> int:
         sessions = [p for p in everything if not FileReplaySource(p).unreliable_labels]
         skipped = len(everything) - len(sessions)
         print(f"{len(sessions)} session(s) with trustworthy labels ({skipped} skipped: UNRELIABLE_LABELS.txt)")
-    totals = [evaluate(s, settings, args.t_from, args.t_to, args.sheet, args.with_corrections, args.raw_labels) for s in sessions]
+    totals = [evaluate(s, settings, args.t_from, args.t_to, args.sheet, args.with_corrections, args.raw_labels, args.scene)
+              for s in sessions]
     if len(totals) > 1:
         print(f"\nTOTAL  game-seconds hidden {sum(t['hidden'] for t in totals):.1f} s, "
               f"ad-seconds leaked {sum(t['leaked'] for t in totals):.1f} of {sum(t['label_ad'] for t in totals):.0f} s")
