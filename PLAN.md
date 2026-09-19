@@ -184,6 +184,11 @@ What exists (`.\run.cmd --game <team>`, details in README.md):
   & distance) — enough for edge matching, and plausibly for the later clock OCR.
 - Cost while recording: ~5 % of one core and ~145 MB, next to Chrome's ~107 % of a core
   (software video decode, since graphics acceleration is off).
+- The WGC source follows size changes without a hiccup (test window resized, sent
+  fullscreen on the ultrawide and back mid-capture: frame size followed each time, largest
+  gap 0.23 s) — so toggling the player's fullscreen mid-game doesn't break a session.
+- A second instance, or a hotkey another program owns, fails at start-up with a clear
+  message and exit code 2, before any session folder is created.
 - Chrome is unmuted on every exit path (quit hotkey, Ctrl+C, console close) and at start-up.
 - `FileReplaySource` replays a session through the live-capture interface;
   `tools/session_info.py` is the first consumer (segments, gaps, label-vs-timeline check,
