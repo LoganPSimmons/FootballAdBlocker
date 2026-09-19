@@ -34,6 +34,8 @@ FORGET_AFTER_S = 45 * 60.0
 AD_TAG_AFTER_S = 10.0  # a forced AD the evidence still contradicts after this long tags frames as ads
 TRUST_AFTER_S = 60.0  # on-screen time a region learned from viewer-tagged frames needs before it counts
 MISSABLE_S = 60.0  # on-screen time (since learned) before a region's *absence* can mean "ad"
+FAST_RETURN_S = 180.0  # on-screen time before a region alone may bring the game back within a second
+FORGET_YOUNG_AFTER_S = 10 * 60.0  # a region with little on-screen time that hasn't been seen this long goes
 ESTABLISHED_S = 300.0  # on-screen time after which a region is never purged as ambiguous
 AMBIGUOUS = (0.35, 0.75)  # a useful graphic scores ~0.9 or ~0 on the history, rarely in between
 MAX_AMBIGUOUS_SHARE = 0.15
@@ -99,6 +101,10 @@ class TrackedRegion:
     def trusted(self) -> bool:
         return not self.seeded or self.seen_s >= TRUST_AFTER_S
 
+    @property
+    def present(self) -> bool:
+        return self.score >= self.region.threshold
+
 
 @dataclass
 class Observation:
@@ -108,6 +114,7 @@ class Observation:
     override: str | None  # viewer correction still being held
     scores: list[float] = field(default_factory=list)  # one per tracked region
     boxes: list[Rect] = field(default_factory=list)  # their boxes, in 640-px analysis space
+    on_screen: int = 0  # how many of the tracked graphics are on screen right now
     video_rect: Rect | None = None  # where the video is inside the captured frame
     learned: bool = False  # the graphics library changed on this frame
 
@@ -169,19 +176,21 @@ class Detector:
         flat = edges.reshape(-1)
         for tracked in library:
             tracked.score = tracked.region.score(flat)
-            if tracked.score >= scorebug.PRESENT:
+            if tracked.present:
                 tracked.seen_s += elapsed
                 tracked.last_seen = t
         # A graphic on screen vouches for the game as soon as it is trusted. Its absence only
         # means something once it has been around for a while: a segment graphic learned a
         # moment ago (a halftime highlights bug, live 2026-09-19) says nothing when it leaves.
-        if any(tr.trusted and tr.score >= scorebug.PRESENT for tr in library):
+        on_screen = [tr for tr in library if tr.trusted and tr.present]
+        strong = any(tr.seen_s >= FAST_RETURN_S for tr in on_screen)
+        if on_screen:
             game_like = True
         elif any(tr.trusted and tr.seen_s >= MISSABLE_S for tr in library):
             game_like = False
         else:
             game_like = None
-        state = self.fusion.update(game_like, t)
+        state = self.fusion.update(game_like, t, strong)
 
         learner.add(gray, edges, t, self._tag(t))
         learned = False
@@ -189,7 +198,7 @@ class Detector:
             self._last_learn[key] = t
             learned = self._learn(learner, library, t, flat)
         return Observation(t, state, game_like, self.fusion.override, [tr.score for tr in library],
-                           [tr.region.bbox for tr in library], rect, learned)
+                           [tr.region.bbox for tr in library], sum(tr.present for tr in library), rect, learned)
 
     def _tag(self, t: float) -> int:
         """What the viewer's latest correction says about the current frame, if anything."""
@@ -203,15 +212,19 @@ class Detector:
         mask = learner.learn()
         before = [tr.region.bbox for tr in library]
         if mask is not None:
-            for region in mask.regions:
+            for region in sorted(mask.regions, key=lambda r: -len(r.on)):  # whole graphics before their parts
                 same = next((tr for tr in library if _overlap(tr.region.bbox, region.bbox) > 0.5), None)
                 if same is not None:
                     same.region = region  # same graphic, fresher pixels
+                elif any(_inside(region.bbox, tr.region.bbox) > 0.7 for tr in library):
+                    continue  # a fragment of a graphic we already track: small, unspecific, and not needed
                 elif not _ambiguous(learner, region):
+                    library[:] = [tr for tr in library if _inside(tr.region.bbox, region.bbox) <= 0.7]  # it replaces its parts
                     library.append(TrackedRegion(region, t, region.score(flat), seeded=mask.seeded))
         # Young regions must keep separating the history cleanly; established ones are never
         # purged (the corner bug must survive a 20-minute halftime whatever it looks like there).
-        library[:] = [tr for tr in library if t - tr.last_seen < FORGET_AFTER_S
+        library[:] = [tr for tr in library
+                      if t - tr.last_seen < (FORGET_AFTER_S if tr.seen_s >= FAST_RETURN_S else FORGET_YOUNG_AFTER_S)
                       and (tr.seen_s >= ESTABLISHED_S or not _ambiguous(learner, tr.region))]
         after = [tr.region.bbox for tr in library]  # "changed" = a graphic came or went, not a box that wobbled a pixel
         return len(after) != len(before) or any(_overlap(a, b) < 0.8 for a, b in zip(after, before))
@@ -226,8 +239,7 @@ class Detector:
             canvas = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
             key = (image.shape[1], image.shape[0], rect, gray.shape)
             for tracked in self._library.get(key, []):
-                present = tracked.score >= scorebug.PRESENT
-                colour = (150, 150, 150) if not tracked.trusted else (80, 255, 80) if present else (60, 60, 255)
+                colour = (150, 150, 150) if not tracked.trusted else (80, 255, 80) if tracked.present else (60, 60, 255)
                 flat = canvas.reshape(-1, 3)
                 flat[tracked.region.on] = colour
                 x0, y0, x1, y1 = tracked.region.bbox
@@ -243,6 +255,15 @@ def _ambiguous(learner: scorebug.MaskLearner, region: scorebug.Region) -> bool:
         return False
     scores = learner.history_scores(region)
     return float(((scores >= AMBIGUOUS[0]) & (scores < AMBIGUOUS[1])).mean()) > MAX_AMBIGUOUS_SHARE
+
+
+def _inside(a: Rect, b: Rect) -> float:
+    """Share of box ``a`` that lies inside box ``b``."""
+    width = min(a[2], b[2]) - max(a[0], b[0])
+    height = min(a[3], b[3]) - max(a[1], b[1])
+    if width <= 0 or height <= 0:
+        return 0.0
+    return width * height / max(1, (a[2] - a[0]) * (a[3] - a[1]))
 
 
 def _overlap(a: Rect, b: Rect) -> float:

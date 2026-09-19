@@ -41,6 +41,23 @@ class Automatic(unittest.TestCase):
         self.assertEqual(line.feed(True, 0.5), AD)  # two frames: not yet
         self.assertEqual(line.feed(True, 0.25), GAME)  # third
 
+    def test_a_young_graphic_has_to_stay_to_bring_the_game_back(self):
+        """Live, 2026-09-19 14:47: a region learned minutes earlier matched a commercial's
+        static end card for about a second - GAME in the middle of the break."""
+        line = Timeline(weak_exit_s=4.0)
+        line.feed(True, 10)
+        line.feed(False, 30)
+
+        def feed_weak(seconds):
+            for _ in range(int(seconds * FPS)):
+                line.states.append(line.fusion.update(True, line.t, strong=False))
+                line.t += 1 / FPS
+            return line.states[-1]
+
+        self.assertEqual(feed_weak(2.5), AD, "an end card's worth of a young graphic is not enough")
+        line.feed(False, 10)
+        self.assertEqual(feed_weak(4.5), GAME, "but one that stays is believed")
+
     def test_losing_the_evidence_during_a_break_shows_the_game(self):
         line = Timeline(unknown_grace_s=3.0)
         line.feed(True, 5)

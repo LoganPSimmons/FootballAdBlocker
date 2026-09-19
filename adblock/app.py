@@ -321,7 +321,7 @@ class Controller(QtCore.QObject):
             return "Learning this broadcast's graphics (takes a minute or two of game picture). Nothing is hidden until then."
         if seen.game_like is None:
             return "Can't see the stream right now (other tab, minimized, or a new window size being learned)."
-        graphics = f"{sum(score >= 0.6 for score in seen.scores)} of {len(seen.scores)} learned graphics on screen"
+        graphics = f"{seen.on_screen} of {len(seen.scores)} learned graphics on screen"
         return f"{'Automatic' if self.auto else 'Manual - the detector only watches'}: {graphics}."
 
     def preview(self):

@@ -43,6 +43,8 @@ MAX_MASK_FRACTION = 0.08  # more persistent edges than this = a paused/static pi
 MIN_LOOKS = 5  # distinct-looking scenes the seed frames must span (live 2026-09-19: a 90 s booth shot has 1)
 LOOK_DIFF = 15.0  # mean gray-level difference between 16x9 thumbnails that makes two frames "different scenes"
 PRESENT = 0.6  # region score that counts as "on screen" (2026-09-19 FOX: ads <= 0.43, game >= 0.83)
+SMALL_REGION_PIXELS = 800  # below this a region is easy to match by accident (a line of ad text will do)...
+PRESENT_SMALL = 0.8  # ...so it has to match almost perfectly (live: 225-px scorebug fragments hit 0.77 on an ad)
 
 TAG_NONE, TAG_GAME, TAG_AD = 0, 1, -1
 
@@ -78,6 +80,11 @@ class Region:
         hit = float(edges_flat[self.on].mean())
         noise = float(edges_flat[self.off].mean()) if len(self.off) else 0.0
         return hit - noise
+
+    @property
+    def threshold(self) -> float:
+        """Score from which this graphic counts as on screen: specificity grows with size."""
+        return PRESENT if len(self.on) >= SMALL_REGION_PIXELS else PRESENT_SMALL
 
     @property
     def where(self) -> str:

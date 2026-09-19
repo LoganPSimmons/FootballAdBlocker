@@ -6,7 +6,10 @@ an ad is cheap. So:
   GAME -> AD    only after the broadcast's graphics have been missing for ``enter_ad_s``
                 without interruption - and only if evidence is *known*: no mask yet, or a
                 picture geometry the mask hasn't been confirmed in, is never a reason to hide
-  AD -> GAME    after ``exit_ad_frames`` consecutive frames with a graphic present (< 1 s)
+  AD -> GAME    after ``exit_ad_frames`` consecutive frames (< 1 s) with an *established*
+                graphic present; a graphic the detector has only known for a short while has
+                to stay for ``weak_exit_s`` - a young, small region can match a commercial's
+                logo-dense end card for a second or two (live 2026-09-19), never for four
   unknown       while in AD, evidence going unknown for ``unknown_grace_s`` drops back to
                 GAME: when we can no longer tell, we show the game
   flapping      two or more short graphics-free "blips" within two minutes (a halftime show
@@ -37,6 +40,7 @@ GAME, AD = "GAME", "AD"
 class FusionSettings:
     enter_ad_s: float = 5.0
     exit_ad_frames: int = 3
+    weak_exit_s: float = 4.0  # how long a not-yet-established graphic must stay to bring the game back
     unknown_grace_s: float = 3.0
     agree_ad_s: float = 1.0  # graphics missing this long = evidence agrees with a forced AD
     agree_game_s: float = 20.0  # graphics on screen this long without a gap = agrees with a forced GAME
@@ -52,6 +56,7 @@ class Fusion:
         self.state = GAME
         self.override: str | None = None  # a viewer correction that the evidence hasn't confirmed yet
         self._present_run = 0
+        self._strong_run = 0
         self._present_since: float | None = None
         self._absent_since: float | None = None
         self._unknown_since: float | None = None
@@ -62,10 +67,12 @@ class Fusion:
         self.state = state
         self.override = state
 
-    def update(self, game_like: bool | None, t: float) -> str:
+    def update(self, game_like: bool | None, t: float, strong: bool = True) -> str:
         """Feed one frame's evidence (True: a broadcast graphic is on screen, False: none is,
-        None: can't tell). Returns the state the app should be in."""
+        None: can't tell; ``strong``: the graphic on screen is an established one). Returns
+        the state the app should be in."""
         s = self.settings
+        self._strong_run = self._strong_run + 1 if game_like and strong else 0
         if game_like is None:
             self._present_run, self._present_since, self._absent_since = 0, None, None
             self._unknown_since = t if self._unknown_since is None else self._unknown_since
@@ -79,11 +86,11 @@ class Fusion:
             self._present_run, self._present_since, self._unknown_since = 0, None, None
             self._absent_since = t if self._absent_since is None else self._absent_since
 
-        present = self._present_run >= s.exit_ad_frames
+        present_for = t - self._present_since if self._present_since is not None else 0.0
+        present = self._strong_run >= s.exit_ad_frames or present_for >= s.weak_exit_s
         absent_for = t - self._absent_since if self._absent_since is not None else 0.0
 
         if self.override is not None:
-            present_for = t - self._present_since if self._present_since is not None else 0.0
             agrees = present_for >= s.agree_game_s if self.override == GAME else absent_for >= s.agree_ad_s
             if not agrees:
                 return self.state
