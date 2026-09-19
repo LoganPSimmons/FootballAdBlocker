@@ -4,17 +4,18 @@ Watch college football on the PC; when an ad break starts, the tool mutes the st
 covers it with a live stats screen (score, win odds, recent plays, box score, other
 games); when the game comes back, it gets out of the way. No more manual mute-and-hide.
 
-Status: **planning** (2026-09-19). Nothing built yet.
+Status: **Phase 0 done** (2026-09-19: S1–S3 pass, S4 negative — results below). Phase 1 in progress.
 
 ## Setup this is designed for
 
 | Fact | Value | Why it matters |
 | --- | --- | --- |
 | Source | **YouTube TV in Chrome** | Every network comes through one player; no ad markers exposed for live TV, so detection has to be visual/audio. |
-| Display | One 1920×1080 monitor | The stats screen has to cover the game on the same screen (no second monitor to park it on). |
-| OS | Windows 11 | Borderless window capture and capture-excluded windows are both available. |
+| Display | Game on the primary 1920×1080 @ 50 Hz screen | The stats screen covers the game where it is. *Observed 2026-09-19:* Windows reports the primary as `E70-E3\|DELL G2722HS` (looks like a TV + monitor in duplicate mode) **plus an LG ultrawide 2560×1080 to its right** — not a single monitor. Nothing depends on there being only one; see "Capture" in the stack. |
+| Chrome | **"Use graphics acceleration" is OFF** (`hardware_acceleration_mode.enabled = false` in Local State) | Every Phase 0 result below was obtained in this state. Capture with acceleration ON is untested — if it is ever turned back on and frames go black, this is why. |
+| OS | Windows 11 (build 26200) | Borderless window capture and capture-excluded windows are both available. |
 | GPU | RTX 3060 Ti (8 GB) | Plenty for a small vision model at a few frames/sec alongside video playback. |
-| Python | 3.11.9 installed | No ffmpeg / node / uv on PATH (not needed for the core). |
+| Python | 3.11.4 in `.venv` | No ffmpeg / node / uv on PATH (not needed for the core). |
 
 ## Approach: a companion app, not a custom player
 
@@ -122,25 +123,39 @@ play's `wallclock` lets us show only plays older than *now − stream delay*. St
 delay slider (default ~45 s); later estimate it automatically by reading the game clock
 off the scorebug and matching it to the play-by-play.
 
-## Risks — settle these first (Phase 0, during any live game)
+## Risks — settled in Phase 0 (2026-09-19, Utah State @ Utah on FOX, live)
 
-| # | Question | How we find out | If the answer is bad |
+Each spike is a script in `tools/` that prints PASS/FAIL and writes evidence to `spike_out/`
+(git-ignored). All of it was measured with Chrome's graphics acceleration **off** (the state
+Chrome was already in) and Chrome on the primary 1920×1080 screen.
+
+| # | Question | Result | What was observed |
 | --- | --- | --- | --- |
-| S1 | Can we capture YouTube TV's video from Chrome, or does DRM give black frames? | 20-line script: grab the Chrome window (Windows Graphics Capture) and the monitor region (DXGI duplication), windowed and fullscreen; save PNGs. **Zero-code pre-check: press Win+Shift+S while a game plays — if the snip shows the video, we're fine.** | Turn off Chrome's *Use graphics acceleration* (the standard fix for black captures) and retest. Last resort: HDMI capture path. |
-| S2 | Does Chrome keep rendering video while our overlay covers it? (Chrome pauses painting when it thinks its window is fully hidden.) | Cover fullscreen Chrome with our topmost window for 60 s; check captured frames keep changing and the overlay isn't in them. | Expected fine: Chrome's occlusion check skips tool-style windows, which is what the overlay is. Fallback: launch Chrome with `--disable-features=CalculateNativeWinOcclusion`. |
-| S3 | Can we mute only Chrome, cleanly? And (for the later audio signal) does loopback capture keep hearing the stream while muted? | pycaw: mute/unmute Chrome's audio session. Then record loopback while muted. | Per-app mute is standard Windows and should just work. Loopback-while-muted is **driver-dependent** (reports go both ways) → if silent, route Chrome through a virtual audio cable and do our own passthrough. Only matters if we ever need audio detection. |
-| S4 | Does the Chrome window title on YouTube TV name the game? | Log it. | If yes → free automatic game selection. If no → pick from a list (filtered by network); auto-match later by OCR of the scorebug. |
+| S1 | Can we capture YouTube TV's video from Chrome, or does DRM give black frames? | **PASS** — no black frames, maximized window and fullscreen | `spike_capture.py`: video area mean luminance 80–130, 0 flat-black frames, picture changing on every sample; PNGs checked by eye (live play with the FOX scorebug). Works through **Windows Graphics Capture** (window, by HWND) and **DXGI duplication** (dxcam). WGC at the full ~50 fps costs ~0.2 of a CPU core in Python; DXGI pulled at 2 fps costs ~0.01–0.05. `windows-capture`'s own DXGI session sometimes returns an **all-black first frame** (edge to edge, toolbar included — an empty frame, not DRM); dxcam never did. **Not tested: acceleration ON.** |
+| S2 | Does Chrome keep rendering video while our overlay covers it? | **PASS** — 60 s, fullscreen | `spike_occlusion.py`: frameless topmost no-activate Qt **tool** window (ex-style `0x08000088` = TOOLWINDOW \| NOACTIVATE \| TOPMOST, not layered) + `WDA_EXCLUDEFROMCAPTURE`, painted magenta, covering fullscreen Chrome. Under it the picture changed on 118/118 half-second ticks (WGC) and 117/118 (DXGI); WGC kept receiving **52.5 fps** (58.5 before) so Chrome never throttled; magenta fraction in every capture = 0.0000; foreground window stayed Chrome; Chrome stayed fullscreen with the same rect. `--disable-features=CalculateNativeWinOcclusion` was **not needed**. Contact sheet checked by eye: game clock runs 12:03 → 11:57 underneath the overlay. Quirk: `GetWindowDisplayAffinity` reads 0 while the window is hidden, though the setting survives hide/show — only verify it while shown. *Not yet run against a maximized (non-fullscreen) window; Phase 1's recorder shows this as a side effect.* |
+| S3 | Can we mute only Chrome, cleanly? Does loopback keep hearing the stream while muted? | **PASS** | `spike_mute.py`: Chrome's audio process holds a session on **every playback device** (4 here, one active) → enumerate all active render endpoints, not just the default. Muting all 4 takes 11–16 ms; speakers' peak meter drops to exactly 0.0 and returns on unmute; no other app's mute flag changed. **Chrome's own session peak meter is pre-mute: it kept reading ~0.16–0.19 while muted** → a free, driver-independent loudness envelope of the muted stream. WASAPI loopback (Realtek): hears **nothing** during a *session* mute (RMS 0.0), hears the stream at full level during an *endpoint* mute (0.051 vs 0.043 unmuted). So loopback is useless for audio detection as long as we session-mute; the session meter, or a virtual-cable passthrough, are the options if Phase 5 ever needs audio. Windows persists per-app mute, so the app must unmute on exit and at startup. |
+| S4 | Does the Chrome window title on YouTube TV name the game? | **NO** | `spike_title.py`: title stayed `Home - YouTube TV - Google Chrome` for the whole game, windowed and fullscreen (it names the YouTube TV section, not the programme). → Game is chosen with `--game <team>` against ESPN's scoreboard (works today: 75 FBS games, lookup by abbreviation/name). Auto-match later by OCR of the scorebug, or of the player's own title ("Utah State at Utah" is drawn over the video when the controls are up). |
 
 The overlay itself is excluded from screen capture (`SetWindowDisplayAffinity`), so the
-detector always sees the stream underneath it, never our own stats screen.
+detector always sees the stream underneath it, never our own stats screen — confirmed for
+both capture paths in S2.
+
+**A detection data point S2 handed us for free.** In that one minute of *live* coverage the
+scorebug was off screen for roughly 25–30 s in a row (a replay, then a coach lower-third
+that replaces the scorebug), while the **"FOX CFB" network bug in the top-right corner
+never left**. Two consequences for Phase 3, to be checked against recorded sessions rather
+than assumed: (1) the "scorebug absent ≥ 15–20 s ⇒ AD regardless" rule would have hidden
+live coverage here, so it must not act alone; (2) the persistent-edge learner should keep
+the corner network bug as a **separate mask** — ads don't carry it, replays and graphics
+do — which is exactly the veto the scorebug needs.
 
 ## Phases
 
 Each phase ends with something usable on a real game day.
 
-**Phase 0 — Feasibility spikes** (~1 hour, needs a live game on screen).
-S1–S4 above. *Exit:* a PNG of the game captured from Chrome; overlay-covered capture keeps
-updating; Chrome mutes/unmutes from a script.
+**Phase 0 — Feasibility spikes** — ✅ **done 2026-09-19** (results in the table above).
+S1–S4. *Exit met:* PNGs of the game captured from Chrome (windowed + fullscreen); the
+overlay-covered capture kept updating for 60 s; Chrome mutes/unmutes from a script.
 
 **Phase 1 — One-key ad mode + recorder.** Global hotkey toggles AD mode: mute Chrome, show
 the overlay (placeholder: score + break timer). Recorder writes frames + toggle timeline to
@@ -176,9 +191,9 @@ needs distributing.
 
 | Concern | Choice |
 | --- | --- |
-| Capture | `windows-capture` (Windows Graphics Capture, follows the Chrome window even when something's on top); `dxcam`/`bettercam` (DXGI region) as fallback — S1 tests both |
+| Capture | **`windows-capture` 2.x — Windows Graphics Capture of the Chrome window by HWND** (won S1/S2). Follows the window across monitors and sizes, never contains other windows, notifications or our overlay, and `minimum_update_interval` throttles delivery so a 2–4 fps consumer doesn't pay for 50 fps (measured: unthrottled 44 fps / 0.40 core; 250 ms → 3.5 fps / 0.09 core; 500 ms → 1.8 fps / 0.08 core — it is a *minimum* interval, so delivery lands a little under the nominal rate). `dxcam` 0.3 (DXGI duplication) also passed and stays as the fallback, but it grabs a *screen region of one output* — anything on top of Chrome lands in the frame, and with two monitors the output has to be chosen. `bettercam` not needed. |
 | Vision | OpenCV + NumPy (scorebug); PyTorch + open_clip / DINOv2 → ONNX Runtime later (classifier) |
-| Mute | `pycaw` (per-app audio session) |
+| Mute | `pycaw` (per-app audio session, on every active playback device). `soundcard` is installed only for the S3 loopback experiment. |
 | Overlay | PySide6 frameless, always-on-top, no-activate tool window; `QWebEngineView` hosting the dashboard; capture-excluded |
 | Dashboard | Plain HTML/CSS/JS + a small chart lib, fed over a local websocket (also openable in a normal browser for debugging) |
 | Data | `httpx` → ESPN, behind a `StatsProvider` interface |
