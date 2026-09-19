@@ -198,6 +198,30 @@ is shown**, not hidden. A learned graphic is therefore never dropped for being o
 while the viewer says "AD" — losing the corner bug would bring back false alarms on every
 replay, i.e. trade the cheap mistake for the expensive one.
 
+**First live halftime (2026-09-19) — what it taught:**
+
+- The FOX halftime show mostly carries **no corner bug** (a studio hit during the 2nd
+  quarter did, the show proper doesn't), so to this detector it looks like commercials. It
+  has its own bottom-left show bug, which the learner picks up by itself when the show
+  dominates its history (it did, on an instance started mid-halftime).
+- Logan's clicks showed what he actually wants at halftime: **show the studio show, hide the
+  commercials** (4× "GAME", 5× "AD" in 9 minutes). Scored against his back-dated labels, the
+  unaided detector hid 0 s of the 11 min of play before the half and ~300 s of halftime show.
+  This is the first concrete job for the Phase 5 classifier ("studio show = show").
+- **Bug found and fixed:** "That's the GAME" over the logo-less studio made the
+  correction-seeded learner take parts of the set and lower-thirds for graphics and trust
+  them at once; one then matched a busy Toyota commercial (0.74) → GAME mid-break, three
+  times in two minutes, and junk matches also released his "GAME" hold early so the show
+  was re-hidden. Now a region learned from viewer-tagged frames counts only after **60 s of
+  on-screen time**, and any region with < 5 min on screen is dropped when > 15 % of its
+  history scores fall in the ambiguous 0.35–0.75 band. Replaying the session with his
+  clicks through the fixed detector removes every false GAME.
+- **Labels:** corrections are applied backwards (`adblock/labels.py`): undoing a detector
+  switch relabels the whole stretch since that switch; an "AD" on a missed break is
+  back-dated to where the graphics vanished. `evaluate.py` scores against these.
+- Open limit: after "That's the GAME" on a picture with no learned graphic, nothing can end
+  the hold, so commercials that follow leak until the viewer says "AD".
+
 **What "trained on corrections" means today, honestly:** corrections re-seed the graphics
 learner live and are stored as labels; `evaluate.py` measures any setting against them. No
 learned *classifier* exists yet — that is Phase 5 (embeddings + linear probe), and it needs
