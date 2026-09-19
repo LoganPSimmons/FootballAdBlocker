@@ -44,9 +44,11 @@ How it behaves:
   ("Agrees" = no graphics for a second after "AD"; graphics that *stay* for 20 s after "GAME".)
 - If the picture keeps flipping between graphics and none (a halftime show flashing scores),
   it stops toggling and leans towards showing: hiding then needs 30 s without graphics.
-- **The network's corner logo means "game"**, so the halftime studio show is shown, not hidden
-  (it carries the same logo). Say "That's an AD" if you don't want it; that holds until the real
-  commercials start.
+- **The network's corner logo means "game".** A halftime studio show mostly does *not* carry it
+  (seen on FOX), so to this detector it looks like commercials and gets hidden. Click "That's the
+  GAME" to watch it — that hold survives the show's short score graphics — and "That's an AD"
+  when its commercials start. Telling a studio show from ads is a job for the learned
+  classifier that is still to come.
 - If it can't see the stream (other tab, minimized, a window size it hasn't learned yet) it
   shows the game rather than guess. Leaving or entering fullscreen makes it learn again for that
   window size, which takes another minute or two of game picture.
