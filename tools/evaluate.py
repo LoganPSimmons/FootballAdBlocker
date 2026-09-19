@@ -4,7 +4,8 @@ The numbers that matter (PLAN.md): **game-seconds hidden** must be ~0; ad-second
 the price we accept for that. Also lists every detector transition, and with --sheet writes a
 contact sheet around each one - that is how detector mistakes and label mistakes are told apart.
 
-Labels are the app state recorded with each frame (hotkey/buttons, corrections included).
+Labels are the app state recorded with each frame, with the viewer's corrections applied
+backwards (adblock/labels.py): undoing a detector switch relabels the whole stretch since it.
 Sessions carrying UNRELIABLE_LABELS.txt are skipped unless named explicitly; use --from/--to
 to restrict a named session to its usable range.
 
@@ -27,6 +28,7 @@ import cv2  # noqa: E402
 import numpy as np  # noqa: E402
 
 from adblock.capture import FileReplaySource  # noqa: E402
+from adblock.labels import effective_labels  # noqa: E402
 from adblock.detect.detector import Detector, FusionSettings  # noqa: E402
 
 
@@ -34,7 +36,18 @@ def clock(seconds: float) -> str:
     return f"{int(seconds) // 60}:{seconds % 60:04.1f}"
 
 
-def replay(session: Path, settings: FusionSettings, with_corrections: bool = False) -> list[dict]:
+def recorded_evidence(session: Path) -> list[tuple[float, bool | None]]:
+    """(t, game_like) as the live detector logged it, for back-dating missed breaks."""
+    path = session / "detector.csv"
+    if not path.exists():
+        return []
+    import csv
+
+    with open(path, newline="", encoding="utf-8") as handle:
+        return [(float(r["t"]), None if r["game_like"] == "" else r["game_like"] == "1") for r in csv.DictReader(handle)]
+
+
+def replay(session: Path, settings: FusionSettings, with_corrections: bool = False, raw_labels: bool = False) -> list[dict]:
     """One dict per recorded frame: t, label, detector state, evidence.
 
     Unaided by default - what the detector does on its own. ``with_corrections`` also replays
@@ -60,6 +73,10 @@ def replay(session: Path, settings: FusionSettings, with_corrections: bool = Fal
         seen = detector.process(frame.image, frame.t, fullscreen_at(frame.t))
         rows.append({"t": frame.t, "index": frame.index, "label": frame.label, "state": seen.state,
                      "game_like": seen.game_like, "best": seen.best, "regions": len(seen.scores), "learned": seen.learned})
+    if not raw_labels:  # corrections say the stretch leading up to them was wrong: apply them backwards
+        fixed = effective_labels([r["t"] for r in rows], [r["label"] for r in rows], source.events(), recorded_evidence(session))
+        for row, label in zip(rows, fixed):
+            row["label"] = label
     return rows
 
 
@@ -95,9 +112,10 @@ def contact_sheet(session: Path, rows: list[dict], moments: list[float], path: P
         cv2.imwrite(str(path), np.vstack(strips), [cv2.IMWRITE_JPEG_QUALITY, 80])
 
 
-def evaluate(session: Path, settings: FusionSettings, t_from: float, t_to: float, sheet: bool, with_corrections: bool) -> dict:
+def evaluate(session: Path, settings: FusionSettings, t_from: float, t_to: float, sheet: bool,
+             with_corrections: bool, raw_labels: bool) -> dict:
     started = time.perf_counter()
-    rows = replay(session, settings, with_corrections)
+    rows = replay(session, settings, with_corrections, raw_labels)
     took = time.perf_counter() - started
     scored = [r for r in rows if t_from <= r["t"] <= t_to]
     steps = np.diff([r["t"] for r in scored], append=scored[-1]["t"]).clip(0, 1.0)  # seconds each frame stands for
@@ -134,6 +152,8 @@ def main() -> int:
     parser.add_argument("--sheet", action="store_true", help="write detector_transitions.jpg into each session")
     parser.add_argument("--enter-ad", type=float, default=FusionSettings.enter_ad_s)
     parser.add_argument("--exit-frames", type=int, default=FusionSettings.exit_ad_frames)
+    parser.add_argument("--raw-labels", action="store_true",
+                        help="score against the recorded state as is, without applying corrections backwards")
     parser.add_argument("--with-corrections", action="store_true",
                         help="also replay the viewer's recorded clicks (default: the detector unaided)")
     args = parser.parse_args()
@@ -145,7 +165,7 @@ def main() -> int:
         sessions = [p for p in everything if not FileReplaySource(p).unreliable_labels]
         skipped = len(everything) - len(sessions)
         print(f"{len(sessions)} session(s) with trustworthy labels ({skipped} skipped: UNRELIABLE_LABELS.txt)")
-    totals = [evaluate(s, settings, args.t_from, args.t_to, args.sheet, args.with_corrections) for s in sessions]
+    totals = [evaluate(s, settings, args.t_from, args.t_to, args.sheet, args.with_corrections, args.raw_labels) for s in sessions]
     if len(totals) > 1:
         print(f"\nTOTAL  game-seconds hidden {sum(t['hidden'] for t in totals):.1f} s, "
               f"ad-seconds leaked {sum(t['leaked'] for t in totals):.1f} of {sum(t['label_ad'] for t in totals):.0f} s")
