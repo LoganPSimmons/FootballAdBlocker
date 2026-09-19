@@ -83,18 +83,18 @@ class SessionWriter:
         """Save the frame if one is due at the session's frame rate. ``at`` is perf_counter time."""
         if at - self._last_saved < 1.0 / self.fps - 0.05:  # tolerance: capture timing jitters
             return False
-        self._last_saved = at
         src_h, src_w = image.shape[:2]
         height = max(1, round(src_h * self.width / src_w))  # keep the aspect ratio: never distort the scorebug
         small = cv2.resize(image, (self.width, height), interpolation=cv2.INTER_AREA)
         ok, encoded = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
         if not ok:
             return False
-        name = f"frames/{self.frame_count:06d}.jpg"
-        (self.dir / name).write_bytes(encoded.tobytes())
-        with self._lock:
-            if self._frames_file.closed:
+        with self._lock:  # index, file and row together: recorder threads can overlap briefly on a re-attach
+            if self._frames_file.closed or at - self._last_saved < 1.0 / self.fps - 0.05:
                 return False
+            self._last_saved = at
+            name = f"frames/{self.frame_count:06d}.jpg"
+            (self.dir / name).write_bytes(encoded.tobytes())
             self._frames.writerow([self.frame_count, self.seconds(at), _wall(), name, state, src_w, src_h])
             self._frames_file.flush()
             self.frame_count += 1
