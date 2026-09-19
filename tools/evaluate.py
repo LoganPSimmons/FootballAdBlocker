@@ -34,10 +34,16 @@ def clock(seconds: float) -> str:
     return f"{int(seconds) // 60}:{seconds % 60:04.1f}"
 
 
-def replay(session: Path, settings: FusionSettings) -> list[dict]:
-    """One dict per recorded frame: t, label, detector state, evidence."""
+def replay(session: Path, settings: FusionSettings, with_corrections: bool = False) -> list[dict]:
+    """One dict per recorded frame: t, label, detector state, evidence.
+
+    Unaided by default - what the detector does on its own. ``with_corrections`` also replays
+    the viewer's recorded clicks at their timestamps, reproducing the live run (held
+    corrections, re-seeded learning).
+    """
     source = FileReplaySource(session)
     windows = sorted((e["t"], e["fullscreen"]) for e in source.events() if e["event"] == "window")
+    clicks = sorted((e["t"], e["to"]) for e in source.events() if e["event"] == "correction") if with_corrections else []
 
     def fullscreen_at(t: float) -> bool:
         current = windows[0][1] if windows else True
@@ -49,6 +55,8 @@ def replay(session: Path, settings: FusionSettings) -> list[dict]:
     detector = Detector(settings)
     rows = []
     for frame in source:
+        while clicks and clicks[0][0] <= frame.t:
+            detector.correct(clicks.pop(0)[1])
         seen = detector.process(frame.image, frame.t, fullscreen_at(frame.t))
         rows.append({"t": frame.t, "index": frame.index, "label": frame.label, "state": seen.state,
                      "game_like": seen.game_like, "best": seen.best, "regions": len(seen.scores), "learned": seen.learned})
@@ -87,9 +95,9 @@ def contact_sheet(session: Path, rows: list[dict], moments: list[float], path: P
         cv2.imwrite(str(path), np.vstack(strips), [cv2.IMWRITE_JPEG_QUALITY, 80])
 
 
-def evaluate(session: Path, settings: FusionSettings, t_from: float, t_to: float, sheet: bool) -> dict:
+def evaluate(session: Path, settings: FusionSettings, t_from: float, t_to: float, sheet: bool, with_corrections: bool) -> dict:
     started = time.perf_counter()
-    rows = replay(session, settings)
+    rows = replay(session, settings, with_corrections)
     took = time.perf_counter() - started
     scored = [r for r in rows if t_from <= r["t"] <= t_to]
     steps = np.diff([r["t"] for r in scored], append=scored[-1]["t"]).clip(0, 1.0)  # seconds each frame stands for
@@ -126,6 +134,8 @@ def main() -> int:
     parser.add_argument("--sheet", action="store_true", help="write detector_transitions.jpg into each session")
     parser.add_argument("--enter-ad", type=float, default=FusionSettings.enter_ad_s)
     parser.add_argument("--exit-frames", type=int, default=FusionSettings.exit_ad_frames)
+    parser.add_argument("--with-corrections", action="store_true",
+                        help="also replay the viewer's recorded clicks (default: the detector unaided)")
     args = parser.parse_args()
     settings = FusionSettings(enter_ad_s=args.enter_ad, exit_ad_frames=args.exit_frames)
 
@@ -135,7 +145,7 @@ def main() -> int:
         sessions = [p for p in everything if not FileReplaySource(p).unreliable_labels]
         skipped = len(everything) - len(sessions)
         print(f"{len(sessions)} session(s) with trustworthy labels ({skipped} skipped: UNRELIABLE_LABELS.txt)")
-    totals = [evaluate(s, settings, args.t_from, args.t_to, args.sheet) for s in sessions]
+    totals = [evaluate(s, settings, args.t_from, args.t_to, args.sheet, args.with_corrections) for s in sessions]
     if len(totals) > 1:
         print(f"\nTOTAL  game-seconds hidden {sum(t['hidden'] for t in totals):.1f} s, "
               f"ad-seconds leaked {sum(t['leaked'] for t in totals):.1f} of {sum(t['label_ad'] for t in totals):.0f} s")
