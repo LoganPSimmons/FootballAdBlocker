@@ -268,6 +268,13 @@ commercials still covered; the three normal sessions find every break within 0.5
 graphics-only detector. Next for Phase 5: replace zero-shot by a probe trained on corrected
 labels from several games (kills the football-looking-ad leaks), and measure on another network.
 
+*Live, same afternoon:* with the fused build (warm start + image model) the end-of-3rd-quarter
+break ran hands-off - AD 5.1 s after the graphics vanished (no veto: the model called the first
+ad a commercial at once), GAME 0.3 s after the broadcast returned, 202 s hidden, no clicks. The
+returning shot - a sponsored fan-cam with a GEICO card - scored -0.50 ("commercial") with the
+image model: had it been allowed to hide, it would have hidden the broadcast. The limited
+powers are not caution for its own sake.
+
 **No per-game training, and a memory** (`detect/memory.py`): graphics are learned unaided in
 the first minutes of every game; those that proved themselves (>= 3 min on screen) are saved
 to `learned/graphics.npz` and start the next session's library. A remembered graphic has no
