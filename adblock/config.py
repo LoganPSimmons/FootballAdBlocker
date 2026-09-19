@@ -19,6 +19,9 @@ class Config:
     label: str = ""  # session folder label; defaults to the game, then "session"
     stream_delay_s: float = 45.0  # spoiler guard: show ESPN data only once it is this old
     pip: bool = True  # small live thumbnail on the overlay, to see when the game is back
+    auto: bool = True  # the detector drives GAME/AD; off = it only watches (shadow mode) and you toggle
+    enter_ad_s: float = 5.0  # broadcast graphics missing this long -> AD (higher = safer for live play)
+    exit_ad_frames: int = 3  # consecutive frames with graphics back -> GAME (~0.75 s at 4 fps)
     record: bool = True
     fps: float = 4.0  # recorded frames per second (2-4). ~40 KB per frame: 4 fps is ~1.7 GB per 3.5 h game
     frame_width: int = 640  # 640x360 when the stream is fullscreen 16:9

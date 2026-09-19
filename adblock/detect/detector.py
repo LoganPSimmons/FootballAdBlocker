@@ -11,9 +11,11 @@ chrome and letterbox bars never do). A geometry nobody has learned yet yields "u
 evidence, which the state machine never treats as a reason to hide anything.
 
 Graphics library. Every region the learner finds is kept and tracked, not replaced: after a
-studio show the old scorebug must still be recognised the moment it returns. A region is
-dropped when the learner finds it present during viewer-confirmed ads, or when it hasn't
-been seen for 45 minutes.
+studio show the old scorebug must still be recognised the moment it returns. A region only
+leaves when it hasn't been seen for 45 minutes. In particular it is *not* dropped for being on
+screen while the viewer says "ad": the halftime studio show carries the network's corner bug,
+viewers reasonably call that a break, and losing the corner bug would bring back false alarms
+on every replay - trading a cheap mistake (an ad leaks) for the expensive one (play hidden).
 """
 
 from __future__ import annotations
@@ -133,6 +135,12 @@ class Detector:
             self._last_learn.clear()
             self.area.forget()
 
+    def unknown(self, t: float) -> Observation:
+        """No usable picture right now (window shows another tab, is minimized, no frames)."""
+        with self._lock:
+            self._last_t = t
+            return Observation(t, self.fusion.update(None, t), None, self.fusion.override)
+
     def process(self, image: np.ndarray, t: float, fullscreen: bool | None = None) -> Observation:
         with self._lock:
             return self._process(image, t, fullscreen)
@@ -161,7 +169,7 @@ class Detector:
         learned = False
         if t - self._last_learn.get(key, float("-inf")) >= RELEARN_EVERY_S:
             self._last_learn[key] = t
-            learned = self._learn(learner, library, t)
+            learned = self._learn(learner, library, t, flat)
         return Observation(t, state, game_like, self.fusion.override, [tr.score for tr in library],
                            [tr.region.bbox for tr in library], rect, learned)
 
@@ -170,10 +178,10 @@ class Detector:
         if self.fusion.override == GAME:
             return scorebug.TAG_GAME  # they just looked at it: the game is on screen
         if self.fusion.override == AD and self._corrected_at is not None and t - self._corrected_at >= AD_TAG_AFTER_S:
-            return scorebug.TAG_AD  # "ad" clicks can be a few seconds early, so only once it has lasted
+            return scorebug.TAG_AD  # kept out of learning ("ad" clicks can be early, so only once it has lasted)
         return scorebug.TAG_NONE
 
-    def _learn(self, learner: scorebug.MaskLearner, library: list[TrackedRegion], t: float) -> bool:
+    def _learn(self, learner: scorebug.MaskLearner, library: list[TrackedRegion], t: float, flat: np.ndarray) -> bool:
         mask = learner.learn()
         before = [tr.region.bbox for tr in library]
         if mask is not None:
@@ -182,9 +190,8 @@ class Detector:
                 if same is not None:
                     same.region = region  # same graphic, fresher pixels
                 else:
-                    library.append(TrackedRegion(region, float(mask.seed_frames), t))
-        library[:] = [tr for tr in library
-                      if t - tr.last_seen < FORGET_AFTER_S and not learner.present_in_ads(tr.region)]
+                    library.append(TrackedRegion(region, float(mask.seed_frames), t, region.score(flat)))
+        library[:] = [tr for tr in library if t - tr.last_seen < FORGET_AFTER_S]
         return [tr.region.bbox for tr in library] != before
 
     def picture(self, image: np.ndarray, fullscreen: bool | None = None) -> np.ndarray | None:

@@ -147,10 +147,11 @@ class ScorePoller(threading.Thread):
     per-play ``wallclock`` filtering.
     """
 
-    def __init__(self, query: str, delay_s: float = 45.0, interval_s: float = 20.0) -> None:
+    def __init__(self, query: str, delay_s: float = 45.0, interval_s: float = 20.0, event_id: str = "") -> None:
         super().__init__(name="espn", daemon=True)
         self.query, self.delay_s, self.interval_s = query, delay_s, interval_s
-        self.status = f"looking up '{query}' on ESPN ..."
+        self.event_id = event_id  # known already (picked from the list in the UI): skip the lookup
+        self.status = "" if event_id else f"looking up '{query}' on ESPN ..."
         self.game_name = ""
         self._history: deque[GameSnapshot] = deque(maxlen=64)  # 64 * 20 s: far longer than any delay
         self._lock = threading.Lock()
@@ -183,7 +184,7 @@ class ScorePoller(threading.Thread):
 
     def run(self) -> None:
         client = EspnClient()
-        event_id = ""
+        event_id = self.event_id
         try:
             while not self._halt.is_set():
                 wait = self.interval_s
@@ -194,6 +195,7 @@ class ScorePoller(threading.Thread):
                             self.status, wait = f"no game today matches '{self.query}'", 120.0
                         else:
                             event_id, self.game_name = game.event_id, game.name
+                            self.event_id = event_id  # so the UI's picker can show what was found
                     if event_id:
                         self.accept(client.game(event_id))
                         self.status = ""

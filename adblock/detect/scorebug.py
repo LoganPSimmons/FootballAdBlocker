@@ -16,9 +16,8 @@ runs live:
             pixels (persistently edge-free ones around it) that now have edges. A graphic
             that is on screen scores ~0.9; busy random texture ~0; a flat frame 0.
 
-Viewer corrections steer the learner directly: frames tagged GAME seed the mask (so a new
-scorebug layout is picked up right after "that's the game"), and a region that is still
-"present" during frames tagged AD is dropped as non-discriminative.
+Viewer corrections steer the learner: frames tagged GAME seed the mask (so a new scorebug
+layout is picked up right after "that's the game"); frames tagged AD are simply left out.
 """
 
 from __future__ import annotations
@@ -230,12 +229,6 @@ class MaskLearner:
         regions = self._regions(persistent, seed)
         return Mask(self.shape, regions, int(seed.sum())) if regions else None
 
-    def present_in_ads(self, region: Region) -> bool:
-        """True if the viewer-confirmed ad frames in the history mostly show this region as
-        present - then it can't tell game from ads and has to go."""
-        ad_frames = self._tags[: len(self)] == TAG_AD
-        return ad_frames.sum() >= 10 and self._presence(region, ad_frames) >= 0.5
-
     def _regions(self, persistent: np.ndarray, seed: np.ndarray) -> list[Region]:
         height, width = self.shape
         blobs = cv2.dilate(persistent.astype(np.uint8), np.ones((9, 9), np.uint8))  # letters -> one logo
@@ -255,14 +248,3 @@ class MaskLearner:
             quiet[box] = self._series(box)[seed].mean(axis=0) <= QUIET
             regions.append(Region((int(x0), int(y0), int(x1), int(y1)), np.flatnonzero(on), np.flatnonzero(quiet)))
         return regions
-
-    def _presence(self, region: Region, frames: np.ndarray) -> float:
-        """Share of the given history frames in which the region scores as present."""
-        pixels = np.zeros(self.shape, bool)
-        flat = pixels.reshape(-1)
-        flat[region.on] = flat[region.off] = True
-        series = self._series(pixels)[frames]
-        is_on = np.isin(np.flatnonzero(flat), region.on)
-        hit = series[:, is_on].mean(axis=1)
-        noise = series[:, ~is_on].mean(axis=1) if (~is_on).any() else 0.0
-        return float(((hit - noise) >= PRESENT).mean())

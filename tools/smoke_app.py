@@ -91,7 +91,8 @@ def main() -> int:
     log_path = OUT / "smoke_app_output.txt"
     with open(log_path, "w", encoding="utf-8") as log:
         app = subprocess.Popen(
-            [sys.executable, "-u", "-m", "adblock.app", "--game", args.game, "--label", "smoke", "--delay", "5",
+            [sys.executable, "-u", "-m", "adblock.app", "--headless", "--no-auto",  # scripted presses must not race the detector
+             "--game", args.game, "--label", "smoke", "--delay", "5",
              "--hotkey", args.hotkey, "--quit-hotkey", args.quit_hotkey, "--duration", str(args.ad_seconds + 40)],
             cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
         )
@@ -158,6 +159,9 @@ def main() -> int:
     checks["frames_labelled_GAME_AD_GAME"] = bool(ad) and labels[0] == "GAME" and labels[-1] == "GAME"
     checks["picture_kept_changing_under_overlay"] = len(ad_diffs) >= 3 and sum(d > 0.3 for d in ad_diffs) >= 0.7 * len(ad_diffs)
     checks["overlay_content_logged"] = "overlay" in kinds
+    checks["presses_logged_as_corrections"] = [e["to"] for e in events if e["event"] == "correction"] == ["AD", "GAME"]
+    detections = (sessions[-1] / "detector.csv").read_text(encoding="utf-8").splitlines()
+    checks["detector_evidence_logged_in_shadow_mode"] = len(detections) > 30 and all(line.split(",")[5] == "0" for line in detections[1:])
     shown = [e for e in events if e["event"] == "overlay_visible"]
     checks["overlay_visibility_logged_as_shown"] = bool(shown) and shown[0]["visible"] is True and shown[0]["reason"] == ""
 
@@ -166,7 +170,7 @@ def main() -> int:
           f"frame size {frames[0].image.shape[1]}x{frames[0].image.shape[0]}; mean JPEG {np.mean(sizes) / 1024:.1f} KB")
     print(f"  AD frame-to-frame diffs: {[round(d, 1) for d in ad_diffs]}")
     for event in events:
-        if event["event"] in ("state", "hotkey", "overlay", "overlay_visible", "capture", "window", "recording"):
+        if event["event"] in ("state", "hotkey", "correction", "overlay", "overlay_visible", "capture", "window", "recording"):
             print("  ", {k: v for k, v in event.items() if k != "wall"})
 
     tiles = []

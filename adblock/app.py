@@ -1,19 +1,25 @@
-"""Phase 1: one-key ad mode + session recorder.
+"""Football Ad Blocker - the app.
 
-    .\\.venv\\Scripts\\python.exe -m adblock.app --game utah
+    start_ui.cmd                                   control window + tray icon, no console
+    .\\run.cmd [--game utah]                        same, with a console for the log
+    .\\run.cmd --headless --no-auto                 no window: hotkeys only (what the smoke test drives)
 
-Press the hotkey (default F9) when an ad break starts: Chrome is muted and the overlay covers
-the stream. Press it again when the game is back. Every press is logged next to low-res
-frames of the stream under sessions/<date>_<label>/ - the labelled data later phases train
-and evaluate on. Ctrl+Shift+F9 (or Ctrl+C in the console) quits and always unmutes Chrome.
+The detector watches the stream's Chrome window and switches between GAME and AD by itself
+(mute Chrome + cover the stream). When it gets it wrong, tell it - "That's the game" on the
+overlay, the two buttons in the control window, the tray menu, or F9. A correction takes
+effect at once, is held until the picture agrees with it, and is recorded as a label.
+Everything lands in sessions/<date>_<label>/ for evaluation and training.
 """
 
 from __future__ import annotations
 
 import argparse
 import ctypes
+import logging
+import logging.handlers
 import signal
 import sys
+import threading
 import time
 from ctypes import wintypes
 from pathlib import Path
@@ -25,19 +31,33 @@ from adblock.actuators import audio_mute
 from adblock.actuators.overlay import Overlay
 from adblock.capture import WgcWindowSource
 from adblock.data.espn import ScorePoller
+from adblock.detect.detector import AD, GAME, Detector, FusionSettings, Observation
 from adblock.hotkeys import HotkeyError, HotkeyListener
 from adblock.recorder import RecordingThread, SessionWriter
 
-GAME, AD = "GAME", "AD"
 TICK_MS = 250
 REATTACH_EVERY_S = 2.0
 REMUTE_EVERY_S = 2.0
+NO_FRAMES_S = 2.0  # no analysed frame for this long = the detector can't see the stream
 
+log = logging.getLogger("adblock")
 _console_handler = None  # keeps the ctypes callback alive for the life of the process
 
 
 def say(message: str) -> None:
-    print(f"[{time.strftime('%H:%M:%S')}] {message}", flush=True)
+    log.info(message)
+
+
+def setup_logging() -> None:
+    """Console when there is one, and always logs/app.log (pythonw has no console at all)."""
+    folder = config_module.ROOT / "logs"
+    folder.mkdir(exist_ok=True)
+    handlers: list[logging.Handler] = [logging.handlers.RotatingFileHandler(folder / "app.log", maxBytes=1_000_000, backupCount=3, encoding="utf-8")]
+    if sys.stdout is not None:
+        handlers.append(logging.StreamHandler(sys.stdout))
+    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S", handlers=handlers)
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # one line per ESPN poll is noise
+    sys.excepthook = lambda kind, value, trace: log.error("unhandled error", exc_info=(kind, value, trace))
 
 
 def unmute_on_console_close() -> None:
@@ -61,16 +81,43 @@ def unmute_on_console_close() -> None:
     ctypes.WinDLL("kernel32").SetConsoleCtrlHandler(handler, True)
 
 
+class DetectorThread(threading.Thread):
+    """Runs every captured frame through the detector. Like the recorder it never looks at
+    the window while it shows another tab: that is reported as "can't see the stream"."""
+
+    def __init__(self, source: WgcWindowSource, detector: Detector, hwnd: int, title_contains: str, emit) -> None:
+        super().__init__(name="detector", daemon=True)
+        self.source, self.detector, self.hwnd, self.needle, self.emit = source, detector, hwnd, title_contains.lower(), emit
+
+    def run(self) -> None:
+        for frame in self.source:
+            try:
+                if self.needle in win32.window_title(self.hwnd).lower():
+                    seen = self.detector.process(frame.image, frame.t, win32.is_fullscreen(self.hwnd))
+                else:
+                    seen = self.detector.unknown(frame.t)
+            except Exception:  # a bad frame must not end detection for the rest of the game
+                log.exception("detector failed on a frame")
+                continue
+            self.emit(seen)
+
+
 class Controller(QtCore.QObject):
     hotkey = QtCore.Signal(str, float)  # (action, perf_counter when pressed); emitted from the hotkey thread
+    observed = QtCore.Signal(object)  # Observation; emitted from the detector thread
 
     def __init__(self, app: QtWidgets.QApplication, config: config_module.Config) -> None:
         super().__init__()
         self.app, self.config = app, config
         self.state = GAME
+        self.state_source = "start"
+        self.auto = config.auto
+        self.corrections = 0
         self.break_started = 0.0
         self.stream: win32.WindowInfo | None = None
         self.source: WgcWindowSource | None = None
+        self.observation: Observation | None = None
+        self.observation_at = time.perf_counter()
         self.last_attach_try = self.last_remute = 0.0
         self.last_geometry: tuple | None = None
         self.last_shown: tuple[str, str] | None = None
@@ -86,17 +133,22 @@ class Controller(QtCore.QObject):
         })
         self.listener.start_and_wait()  # raises HotkeyError if a combination is taken
 
+        self.detector = Detector(FusionSettings(enter_ad_s=config.enter_ad_s, exit_ad_frames=config.exit_ad_frames))
+        self.observed.connect(self.on_observation)
         self.overlay = Overlay(config.hotkey, config.pip)
+        self.overlay.show_game.connect(lambda: self.correct(GAME, "overlay_button"))
         self.writer = SessionWriter(config.sessions_path, config.label or config.game or "session",
                                     config.fps, config.frame_width, config.jpeg_quality) if config.record else None
-        self.scores = ScorePoller(config.game, config.stream_delay_s) if config.game else None
+        self.scores: ScorePoller | None = None
+        self.game_label = ""
 
         if self.writer:
             self.writer.start(app_version=__version__, hotkey=config.hotkey, title_contains=config.title_contains,
                               game_query=config.game, stream_delay_s=config.stream_delay_s, capture="wgc-window",
+                              auto=config.auto, enter_ad_s=config.enter_ad_s, exit_ad_frames=config.exit_ad_frames,
                               overlay_capture_excluded=self.overlay.capture_excluded)
-        if self.scores:
-            self.scores.start()
+        if config.game:
+            self.set_game(config.game)
         if audio_mute.is_muted():  # a previous run died while muted; GAME means audible
             audio_mute.set_muted(False)
             say("Chrome was muted from an earlier run - unmuted it.")
@@ -119,6 +171,8 @@ class Controller(QtCore.QObject):
         self.source = WgcWindowSource(stream.hwnd, min_interval_ms=max(50, int(1000 / self.config.fps) - 10))
         if self.writer:
             RecordingThread(self.source, self.writer, lambda: self.state, stream.hwnd, self.config.title_contains).start()
+        DetectorThread(self.source, self.detector, stream.hwnd, self.config.title_contains, self.observed.emit).start()
+        self.observation_at = time.perf_counter()
         self.log("capture", status="acquired", hwnd=stream.hwnd, title=stream.title)
         say(f"Watching Chrome window {stream.hwnd:#x}: {stream.title!r}")
 
@@ -130,18 +184,69 @@ class Controller(QtCore.QObject):
         say(f"Stream window lost ({reason}); waiting for it to come back.")
         self.set_state(GAME, "stream_lost")  # nothing left to cover; never leave Chrome muted
 
-    # --- state ------------------------------------------------------------------------------
+    # --- what the viewer can do -------------------------------------------------------------
     def on_hotkey(self, action: str, pressed_at: float) -> None:
         self.log("hotkey", pressed_at, action=action, state_before=self.state)
         if action == "quit":
             self.app.quit()
         else:
-            self.set_state(AD if self.state == GAME else GAME, "hotkey", pressed_at)
+            self.correct(AD if self.state == GAME else GAME, "hotkey", pressed_at)
+
+    def correct(self, state: str, via: str, at: float | None = None) -> None:
+        """The viewer says what is on screen. Takes effect now, is held until the picture
+        agrees, and is the strongest label a session contains."""
+        seen = self.observation
+        self.corrections += 1
+        self.log("correction", at, to=state, via=via, app_state_before=self.state, auto=self.auto,
+                 detector_state=seen.state if seen else None, game_like=seen.game_like if seen else None,
+                 scores=[round(score, 2) for score in seen.scores] if seen else [])
+        self.detector.correct(state)
+        self.set_state(state, via, at)
+
+    def set_auto(self, auto: bool) -> None:
+        if auto != self.auto:
+            self.auto = auto
+            self.log("auto", enabled=auto)
+            say(f"Automatic detection {'on' if auto else 'off (the detector only watches)'}")
+
+    def set_pip(self, enabled: bool) -> None:
+        self.config.pip = enabled
+        self.overlay.set_pip_enabled(enabled)
+
+    def set_game(self, query: str, event_id: str = "", label: str = "") -> None:
+        """Whose score the overlay shows: a team to look up, or an ESPN event picked from the list."""
+        if self.scores:
+            self.scores.stop()
+        self.scores = ScorePoller(query, self.config.stream_delay_s, event_id=event_id) if (query or event_id) else None
+        self.game_label = label or query
+        self.last_shown = None
+        if self.scores:
+            self.scores.start()
+        self.log("game", query=query, event_id=event_id, label=self.game_label)
+
+    def relearn(self) -> None:
+        self.detector.relearn()
+        self.log("relearn")
+        say("Forgot the learned graphics; learning them again.")
+
+    # --- state ------------------------------------------------------------------------------
+    def on_observation(self, seen: Observation) -> None:
+        self.observation, self.observation_at = seen, time.perf_counter()
+        if self.writer:
+            self.writer.add_detection(seen.t, self.state, seen.state, seen.game_like, seen.override, self.auto, seen.scores)
+            if seen.learned and self.source and (frame := self.source.latest()) is not None and self.stream:
+                picture = self.detector.picture(frame.image, win32.is_fullscreen(self.stream.hwnd))
+                if picture is not None:
+                    self.writer.save_graphics(seen.t, picture)
+        if seen.learned:
+            say(f"Learned graphics: {len(seen.scores)} region(s) " + ", ".join(f"{score:.2f}" for score in seen.scores))
+        if self.auto and seen.state != self.state:
+            self.set_state(seen.state, "detector")
 
     def set_state(self, state: str, source: str, at: float | None = None) -> None:
         if state == self.state:
             return
-        self.state = state
+        self.state, self.state_source = state, source
         sessions = None
         if state == GAME:
             self.overlay.hide()  # picture first: never keep live play hidden a moment longer
@@ -185,19 +290,46 @@ class Controller(QtCore.QObject):
             self.overlay.hide()
             return
         self.overlay.set_break_seconds(time.perf_counter() - self.break_started)
+        self.overlay.set_reason("detected automatically" if self.state_source == "detector"
+                                else "you said so  -  held until the picture agrees" if self.detector.fusion.override == AD
+                                else "you said so")
         if self.scores is None:
-            shown = ("", "no game selected  -  start with  --game <team>")
+            shown = ("", "no game selected")
         elif (snapshot := self.scores.current()) is not None:
             shown = (snapshot.score_line(), f"{snapshot.status_detail}   ·   {snapshot.network}".strip(" ·"))
         else:
             shown = ("", self.scores.status or f"score shows once it is {self.config.stream_delay_s:.0f} s old (spoiler guard)")
-        if shown != self.last_shown:  # the overlay can't be screenshotted, so the timeline says what it displayed
+        if shown != self.last_shown:
             self.last_shown = shown
             self.overlay.set_score(*shown)
             self.log("overlay", score=shown[0], detail=shown[1])
         if self.source and (frame := self.source.latest()) is not None:
             self.overlay.set_thumbnail(frame.image)
         self.overlay.cover(win32.window_rect(self.stream.hwnd))
+
+    # --- what the UI shows ----------------------------------------------------------------------
+    def status(self) -> str:
+        seen = self.observation
+        if self.stream is None:
+            return f"Waiting for a Chrome window with '{self.config.title_contains}' in its title."
+        if seen is not None and seen.override == AD and not seen.scores:
+            return ("You said AD. I haven't learned this broadcast's graphics yet, so I can't tell when the game "
+                    "is back: click \"That's the GAME\" when it is.")
+        if seen is not None and seen.override:
+            return f"You said {seen.override}. Holding that until the picture agrees, then automatic again."
+        if seen is None or not seen.scores:
+            return "Learning this broadcast's graphics (takes a minute or two of game picture). Nothing is hidden until then."
+        if seen.game_like is None:
+            return "Can't see the stream right now (other tab, minimized, or a new window size being learned)."
+        graphics = f"{sum(score >= 0.6 for score in seen.scores)} of {len(seen.scores)} learned graphics on screen"
+        return f"{'Automatic' if self.auto else 'Manual - the detector only watches'}: {graphics}."
+
+    def preview(self):
+        """The analysed picture with the learned graphics drawn in (BGR), or the plain frame, or None."""
+        if not (self.source and self.stream) or (frame := self.source.latest()) is None:
+            return None
+        picture = self.detector.picture(frame.image, win32.is_fullscreen(self.stream.hwnd))
+        return picture if picture is not None else frame.image
 
     # --- heartbeat --------------------------------------------------------------------------
     def tick(self) -> None:
@@ -215,6 +347,8 @@ class Controller(QtCore.QObject):
             if geometry != self.last_geometry:
                 self.last_geometry = geometry
                 self.log("window", rect=geometry[0], fullscreen=geometry[1])
+            if now - self.observation_at >= NO_FRAMES_S:  # minimized, or the picture froze: can't see the stream
+                self.on_observation(self.detector.unknown(now))
         if self.state == AD:
             self.refresh_overlay()
             if now - self.last_remute >= REMUTE_EVERY_S:  # Chrome may open a new audio session mid-break
@@ -237,52 +371,65 @@ class Controller(QtCore.QObject):
             self.source.stop()
         if self.writer:
             self.writer.close()
-            say(f"Session saved: {self.writer.dir}  ({self.writer.frame_count} frames)")
+            say(f"Session saved: {self.writer.dir}  ({self.writer.frame_count} frames, {self.corrections} corrections)")
 
 
-def parse_args(argv: list[str]) -> tuple[config_module.Config, float | None]:
+def parse_args(argv: list[str]) -> tuple[config_module.Config, argparse.Namespace]:
     parser = argparse.ArgumentParser(prog="python -m adblock.app", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", type=Path, help="TOML settings file (default: config.toml if present)")
-    parser.add_argument("--game", help="team to show the score for, e.g. utah or USU")
+    parser.add_argument("--game", help="team to show the score for, e.g. utah or USU (the control window has a picker)")
     parser.add_argument("--label", help="session folder label (default: the game)")
-    parser.add_argument("--hotkey", help="ad-mode toggle (default F9)")
+    parser.add_argument("--hotkey", help="ad-mode toggle / correction (default F9)")
     parser.add_argument("--quit-hotkey", dest="quit_hotkey", help="clean exit (default ctrl+shift+F9)")
     parser.add_argument("--title", dest="title_contains", help="text that identifies the stream's Chrome window")
-    parser.add_argument("--fps", type=float, help="recorded frames per second (default 4)")
+    parser.add_argument("--fps", type=float, help="analysed and recorded frames per second (default 4)")
     parser.add_argument("--delay", dest="stream_delay_s", type=float, help="spoiler guard in seconds (default 45)")
+    parser.add_argument("--enter-ad", dest="enter_ad_s", type=float, help="seconds without graphics before hiding (default 5)")
+    parser.add_argument("--no-auto", dest="auto", action="store_false", default=None, help="detector only watches; you toggle")
     parser.add_argument("--no-record", dest="record", action="store_false", default=None)
     parser.add_argument("--no-pip", dest="pip", action="store_false", default=None)
+    parser.add_argument("--headless", action="store_true", help="no control window or tray icon: hotkeys only")
     parser.add_argument("--duration", type=float, help="quit by itself after this many seconds (for testing)")
     args = parser.parse_args(argv)
     config = config_module.load(args.config)
     for name, value in vars(args).items():
         if value is not None and hasattr(config, name):
             setattr(config, name, value)
-    return config, args.duration
+    return config, args
 
 
 def main(argv: list[str] | None = None) -> int:
+    setup_logging()
     try:
-        config, duration = parse_args(sys.argv[1:] if argv is None else argv)
+        config, args = parse_args(sys.argv[1:] if argv is None else argv)
     except (ValueError, FileNotFoundError) as exc:
         print(f"config error: {exc}")
         return 2
 
     app = QtWidgets.QApplication([])  # first: Qt makes the process per-monitor DPI aware
     app.setQuitOnLastWindowClosed(False)
+    app.setApplicationName("Football Ad Blocker")
     try:
         controller = Controller(app, config)
     except HotkeyError as exc:
-        print(f"hotkey error: {exc}")
+        say(f"hotkey error: {exc}")
+        if not args.headless:
+            QtWidgets.QMessageBox.warning(None, "Football Ad Blocker", f"{exc}\n\nIs Football Ad Blocker already running? "
+                                          "Look for its icon in the system tray.")
         return 2
     app.aboutToQuit.connect(controller.shutdown)
     signal.signal(signal.SIGINT, lambda *_: app.quit())  # the 250 ms tick gives Python the chance to see Ctrl+C
     unmute_on_console_close()
-    if duration:
-        QtCore.QTimer.singleShot(int(duration * 1000), app.quit)
+    if args.duration:
+        QtCore.QTimer.singleShot(int(args.duration * 1000), app.quit)
+    if not args.headless:
+        from adblock.ui import build_ui
 
-    say(f"Football Ad Blocker {__version__}:  {config.hotkey.upper()} = ad mode on/off,  {config.quit_hotkey.upper()} = quit.")
+        ui = build_ui(app, controller)  # noqa: F841 - keeps the window and tray icon alive
+
+    say(f"Football Ad Blocker {__version__}: {'automatic' if config.auto else 'manual'}; "
+        f"{config.hotkey.upper()} = correct it / toggle, {config.quit_hotkey.upper()} = quit.")
     if controller.writer:
         say(f"Recording to {controller.writer.dir}")
     if controller.stream is None:

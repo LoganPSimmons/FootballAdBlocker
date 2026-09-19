@@ -30,12 +30,17 @@ QLabel { color: #e8edf2; font-family: 'Segoe UI'; }
 #timer { font-size: 150px; font-weight: 700; }
 #score { font-size: 64px; font-weight: 700; }
 #detail { color: #9fb0c3; font-size: 30px; }
-#hint, #pipCaption { color: #5d6b7a; font-size: 20px; }
+#reason, #pipCaption { color: #5d6b7a; font-size: 20px; }
+#showGame { color: #e8edf2; background: #1b2530; border: 2px solid #3a4856; border-radius: 10px;
+            font: 600 26px 'Segoe UI'; padding: 16px 28px; }
+#showGame:hover { background: #26405a; border-color: #5b8fc2; }
 #pip { border: 2px solid #2a3440; background: #000; }
 """
 
 
 class Overlay(QtWidgets.QWidget):
+    show_game = QtCore.Signal()  # the viewer clicked "that's the game": the costliest mistake, fixed where it shows
+
     def __init__(self, hotkey_text: str, show_pip: bool = True) -> None:
         super().__init__(
             None,
@@ -61,8 +66,10 @@ class Overlay(QtWidgets.QWidget):
         self.detail = label("detail")
         centre = QtWidgets.QVBoxLayout()
         centre.addStretch(3)
+        self.reason = label("reason")
         centre.addWidget(label("caption", "AD BREAK"))
         centre.addWidget(self.timer)
+        centre.addWidget(self.reason)
         centre.addSpacing(30)
         centre.addWidget(self.score)
         centre.addWidget(self.detail)
@@ -72,16 +79,18 @@ class Overlay(QtWidgets.QWidget):
         self.pip.setFixedSize(PIP_WIDTH + 4, PIP_WIDTH * 9 // 16 + 4)
         pip_column = QtWidgets.QVBoxLayout()
         pip_column.addWidget(self.pip)
-        pip_column.addWidget(label("pipCaption", "live picture (muted)"))
+        self.pip_caption = label("pipCaption", "live picture (muted)")
+        pip_column.addWidget(self.pip_caption)
         footer = QtWidgets.QHBoxLayout()
-        hint = label("hint", f"{hotkey_text.upper()}  -  back to the game")
-        footer.addWidget(hint, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
+        button = QtWidgets.QPushButton(f"That's the game  -  show it   ({hotkey_text.upper()})")
+        button.setObjectName("showGame")
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # the overlay never takes focus from Chrome
+        button.clicked.connect(self.show_game)
+        footer.addWidget(button, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
         footer.addStretch(1)
         footer.addLayout(pip_column)
-        self.pip_enabled = show_pip
-        if not show_pip:
-            self.pip.hide()
-            pip_column.itemAt(1).widget().hide()
+        self.set_pip_enabled(show_pip)
 
         root = QtWidgets.QVBoxLayout(self)
         root.setContentsMargins(40, 40, 40, 40)
@@ -101,6 +110,15 @@ class Overlay(QtWidgets.QWidget):
             self.setGeometry(geometry)
         if not self.isVisible():
             self.show()
+
+    def set_reason(self, text: str) -> None:
+        """Why the overlay is up: detected automatically, or because the viewer said so."""
+        self.reason.setText(text)
+
+    def set_pip_enabled(self, enabled: bool) -> None:
+        self.pip_enabled = enabled
+        self.pip.setVisible(enabled)
+        self.pip_caption.setVisible(enabled)
 
     def set_break_seconds(self, seconds: float) -> None:
         self.timer.setText(f"{int(seconds) // 60}:{int(seconds) % 60:02d}")

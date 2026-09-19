@@ -7,6 +7,12 @@ Every game watched becomes a labelled dataset as a side effect of using the hotk
     timeline.jsonl    one JSON object per line: session_start, hotkey, state, window, capture, session_end
     frames.csv        index,t,wall,file,state,src_w,src_h   (state = app state when the frame was captured)
     frames/000000.jpg ...
+    detector.csv      t,app_state,detector_state,game_like,override,auto,scores   (one row per analysed frame)
+    graphics/*.png    what the detector had learned, saved whenever that changed
+
+Labels. ``state`` is what the viewer was shown and let stand - a weak label (they may not have
+been watching). ``correction`` events in the timeline are the strong ones: the viewer looked
+at the screen and said "that's an ad" / "that's the game".
 
 ``t`` is seconds since the session started (monotonic clock) in both files, so frames and
 events line up exactly. Everything is appended and flushed as it happens: a crash loses at
@@ -31,6 +37,7 @@ from adblock import win32
 from adblock.capture import FrameSource
 
 FRAME_COLUMNS = ["index", "t", "wall", "file", "state", "src_w", "src_h"]
+DETECTOR_COLUMNS = ["t", "app_state", "detector_state", "game_like", "override", "auto", "scores"]
 
 
 def slugify(text: str) -> str:
@@ -61,6 +68,10 @@ class SessionWriter:
         self._frames_file = open(self.dir / "frames.csv", "a", newline="", encoding="utf-8")
         self._frames = csv.writer(self._frames_file)
         self._frames.writerow(FRAME_COLUMNS)
+        self._detector_file = open(self.dir / "detector.csv", "a", newline="", encoding="utf-8")
+        self._detector = csv.writer(self._detector_file)
+        self._detector.writerow(DETECTOR_COLUMNS)
+        self._detector_rows = 0
 
     def seconds(self, at: float | None = None) -> float:
         """Session time of a ``time.perf_counter()`` reading (default: now)."""
@@ -100,11 +111,32 @@ class SessionWriter:
             self.frame_count += 1
         return True
 
+    def add_detection(self, at: float, app_state: str, detector_state: str, game_like: bool | None,
+                      override: str | None, auto: bool, scores: list[float]) -> None:
+        """One analysed frame's evidence. Flushed every few seconds - it is a lot of tiny rows."""
+        with self._lock:
+            if self._detector_file.closed:
+                return
+            self._detector.writerow([self.seconds(at), app_state, detector_state,
+                                     "" if game_like is None else int(game_like), override or "", int(auto),
+                                     " ".join(f"{score:.2f}" for score in scores)])
+            self._detector_rows += 1
+            if self._detector_rows % 20 == 0:
+                self._detector_file.flush()
+
+    def save_graphics(self, at: float, picture: np.ndarray) -> None:
+        folder = self.dir / "graphics"
+        folder.mkdir(exist_ok=True)
+        ok, encoded = cv2.imencode(".png", picture)
+        if ok:
+            (folder / f"{self.seconds(at):08.1f}.png").write_bytes(encoded.tobytes())
+
     def close(self) -> None:
         self.log("session_end", frames=self.frame_count)
         with self._lock:
             self._timeline.close()
             self._frames_file.close()
+            self._detector_file.close()
 
 
 class RecordingThread(threading.Thread):

@@ -4,3 +4,5 @@ spike_out/
 __pycache__/
 *.pyc
 config.toml
+ui_state.json
+logs/
