@@ -52,7 +52,7 @@ class Broadcast:
 class SyntheticBroadcast(unittest.TestCase):
     def test_learns_graphics_hides_ads_never_hides_play(self):
         tv = Broadcast()
-        seen = tv.play(150, scorebug, corner_bug)  # 2.5 min of play
+        seen = tv.play(240, scorebug, corner_bug)  # 4 min of play
         self.assertGreaterEqual(len(seen.scores), 2, "should have learned both graphics")
         self.assertTrue(seen.game_like)
 
@@ -70,7 +70,7 @@ class SyntheticBroadcast(unittest.TestCase):
 
     def test_correction_teaches_new_graphics(self):
         tv = Broadcast()
-        tv.play(120, scorebug, corner_bug)
+        tv.play(240, scorebug, corner_bug)
         tv.play(30)  # a break
         self.assertEqual(tv.detector.state, AD)
 
@@ -95,7 +95,7 @@ class SyntheticBroadcast(unittest.TestCase):
         any network logo; the learner took the studio set for graphics, and one of those
         regions then matched a busy truck commercial - GAME in the middle of an ad break."""
         tv = Broadcast()
-        tv.play(120, scorebug, corner_bug)
+        tv.play(240, scorebug, corner_bug)
         tv.play(20)  # break -> AD
         self.assertEqual(tv.detector.state, AD)
 
@@ -125,6 +125,26 @@ class SyntheticBroadcast(unittest.TestCase):
         back = tv.t
         tv.play(5, scorebug, corner_bug)
         self.assertEqual(tv.states_between(back + 1, tv.t), {GAME}, "the real graphics still bring the game back")
+
+    def test_a_graphic_learned_a_moment_ago_is_not_missed_when_it_leaves(self):
+        """Live, 2026-09-19 14:37: an instance started during halftime learned the highlights
+        package's bug, the package ended 6 s later, and the booth shot that followed was hidden."""
+        tv = Broadcast()
+        tv.play(100, corner_bug)  # a segment graphic: long enough to be learned...
+        self.assertGreaterEqual(len(tv.detector.process(texture(), tv.t, fullscreen=True).scores), 1)
+        gone = tv.t
+        tv.play(120)  # ...then the segment ends and the broadcast carries on without it
+        self.assertEqual(tv.states_between(gone, tv.t), {GAME}, "too new for its absence to mean anything")
+
+    def test_locked_off_shot_teaches_nothing(self):
+        tv = Broadcast()
+        booth = texture()
+        for _ in range(150 * FPS):  # announcers on camera: the background never changes, only they move
+            frame = booth.copy()
+            frame[60:300, 150:500] = texture()[60:300, 150:500]
+            seen = tv.detector.process(frame, tv.t, fullscreen=True)
+            tv.t += 1 / FPS
+        self.assertEqual(seen.scores, [], "a background that persists within one shot is scenery, not graphics")
 
     def test_paused_picture_teaches_nothing(self):
         tv = Broadcast()

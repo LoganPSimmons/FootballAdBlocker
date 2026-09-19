@@ -9,6 +9,9 @@ runs live:
   learner   keeps ~8 minutes of edge maps (one per second) and looks for the pixels whose
             edges persist *together*: start from overall frequency, then keep the pixels
             present in >= 90 % of the frames that match the first guess, and repeat
+  scenes    the frames a mask is learned from must show several visibly different scenes:
+            a graphic persists *across cuts*, whereas a locked-off shot (announcers in the
+            booth, a studio desk) makes its whole background "persistent" for a minute
   regions   persistent pixels are grouped into regions that are scored separately, because
             they come and go separately: replays, full-screen graphics and the return-from-
             break bumper drop the scorebug but keep the corner bug (seen on FOX, 2026-09-19)
@@ -37,6 +40,8 @@ PERSISTENT = 0.90  # a mask pixel has an edge in >= 90 % of game-like frames
 QUIET = 0.03  # a quiet pixel has one in <= 3 %
 MIN_REGION_PIXELS = 80
 MAX_MASK_FRACTION = 0.08  # more persistent edges than this = a paused/static picture, not graphics
+MIN_LOOKS = 5  # distinct-looking scenes the seed frames must span (live 2026-09-19: a 90 s booth shot has 1)
+LOOK_DIFF = 15.0  # mean gray-level difference between 16x9 thumbnails that makes two frames "different scenes"
 PRESENT = 0.6  # region score that counts as "on screen" (2026-09-19 FOX: ads <= 0.43, game >= 0.83)
 
 TAG_NONE, TAG_GAME, TAG_AD = 0, 1, -1
@@ -115,6 +120,7 @@ class MaskLearner:
         height, width = shape
         self._packed = np.zeros((capacity, height, (width + 7) // 8), np.uint8)
         self._tags = np.zeros(capacity, np.int8)
+        self._thumbs = np.zeros((capacity, 9, 16), np.float32)  # what each sample looked like, very roughly
         self._sum_all = np.zeros(shape, np.int32)  # running per-pixel edge counts, so that
         self._sum_game = np.zeros(shape, np.int32)  # learn() never has to scan whole frames
         self._count = 0
@@ -144,6 +150,7 @@ class MaskLearner:
                 self._sum_game -= old
         self._packed[slot] = np.packbits(edges, axis=1)
         self._tags[slot] = tag
+        self._thumbs[slot] = cv2.resize(gray, (16, 9), interpolation=cv2.INTER_AREA)
         self._sum_all += edges
         if tag == TAG_GAME:
             self._sum_game += edges
@@ -225,10 +232,22 @@ class MaskLearner:
             if seeded:
                 seed |= known_game
 
+        if self._looks(seed) < MIN_LOOKS:  # one long shot: that is scenery, not graphics
+            return None
         persistent = np.zeros(self.shape, bool)
         persistent[candidates] = persistent_c
         regions = self._regions(persistent, seed)
         return Mask(self.shape, regions, int(seed.sum()), seeded) if regions else None
+
+    def _looks(self, selected: np.ndarray) -> int:
+        """How many visibly different scenes the selected samples span (counting stops at MIN_LOOKS)."""
+        looks: list[np.ndarray] = []
+        for thumb in self._thumbs[: len(self)][selected]:
+            if all(float(np.abs(thumb - seen).mean()) > LOOK_DIFF for seen in looks):
+                looks.append(thumb)
+                if len(looks) >= MIN_LOOKS:
+                    break
+        return len(looks)
 
     def history_scores(self, region: Region) -> np.ndarray:
         """The region's score on every frame of the history (same formula as Region.score)."""

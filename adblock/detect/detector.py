@@ -33,6 +33,7 @@ RELEARN_EVERY_S = 30.0
 FORGET_AFTER_S = 45 * 60.0
 AD_TAG_AFTER_S = 10.0  # a forced AD the evidence still contradicts after this long tags frames as ads
 TRUST_AFTER_S = 60.0  # on-screen time a region learned from viewer-tagged frames needs before it counts
+MISSABLE_S = 60.0  # on-screen time (since learned) before a region's *absence* can mean "ad"
 ESTABLISHED_S = 300.0  # on-screen time after which a region is never purged as ambiguous
 AMBIGUOUS = (0.35, 0.75)  # a useful graphic scores ~0.9 or ~0 on the history, rarely in between
 MAX_AMBIGUOUS_SHARE = 0.15
@@ -171,8 +172,15 @@ class Detector:
             if tracked.score >= scorebug.PRESENT:
                 tracked.seen_s += elapsed
                 tracked.last_seen = t
-        trusted = [tr for tr in library if tr.trusted]
-        game_like = any(tr.score >= scorebug.PRESENT for tr in trusted) if trusted else None
+        # A graphic on screen vouches for the game as soon as it is trusted. Its absence only
+        # means something once it has been around for a while: a segment graphic learned a
+        # moment ago (a halftime highlights bug, live 2026-09-19) says nothing when it leaves.
+        if any(tr.trusted and tr.score >= scorebug.PRESENT for tr in library):
+            game_like = True
+        elif any(tr.trusted and tr.seen_s >= MISSABLE_S for tr in library):
+            game_like = False
+        else:
+            game_like = None
         state = self.fusion.update(game_like, t)
 
         learner.add(gray, edges, t, self._tag(t))
