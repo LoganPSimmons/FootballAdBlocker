@@ -46,8 +46,10 @@ def main() -> int:
     events = sorted(replay.events(), key=lambda e: e["t"])  # hotkey/state carry the key-press time: sort, don't trust file order
     rows = replay.rows
     print(f"Session {session}")
-    if replay.synthetic_labels:
-        print("  !! SYNTHETIC LABELS (scripted key presses) - not usable for training or evaluation")
+    if replay.unreliable_labels:
+        print("  !! UNRELIABLE LABELS - not usable for training or evaluation as is:")
+        for line in replay.unreliable_labels.splitlines():
+            print(f"     {line}")
     if not rows:
         print("  no frames")
         return 1

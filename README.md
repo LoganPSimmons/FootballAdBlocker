@@ -24,8 +24,9 @@ Good to know:
 
 - The score is shown **45 s late on purpose** (`--delay`): YouTube TV runs behind ESPN's feed and
   the overlay must not spoil a play you haven't seen. For the first 45 s after start-up there is no score yet.
-- The overlay steps aside if you switch to another visible app on top of the stream, and
-  returns when you go back to Chrome. It stays put if you click something on the other monitor.
+- The overlay steps aside when another app's window is actually *in front of* the stream, and
+  returns when Chrome is back on top. Clicking something on the other monitor (or the desktop)
+  doesn't move it.
 - The stream's Chrome window is recognised by **"YouTube TV" in its title** (`--title`). If you
   switch that window to another tab, recording pauses until you come back — nothing but the
   stream is ever saved.
@@ -35,13 +36,15 @@ Good to know:
 
 ## What gets recorded
 
-`sessions/<date>_<label>/` (git-ignored, stays on this PC):
+`sessions/<date>_<label>/` (git-ignored, stays on this PC). If you watched a game *without* pressing
+the hotkey, drop an `UNRELIABLE_LABELS.txt` (any explanation inside) into its folder so it is never
+used as ground truth — `tools/smoke_app.py` does that for its own scripted sessions.
 
 | File | Content |
 | --- | --- |
 | `frames/000000.jpg …` | 640-px-wide JPEGs at ~4 fps (640×360 when the stream is fullscreen), ~35 KB each → roughly 1.5 GB for a 3.5 h game. `--fps 2` halves that. |
 | `frames.csv` | `index,t,wall,file,state,src_w,src_h` — `state` is GAME/AD when the frame was captured |
-| `timeline.jsonl` | one JSON object per line: `session_start`, `hotkey`, `state`, `overlay`, `window`, `capture`, `recording`, `session_end`. `t` = seconds since session start; hotkey/state events carry the **key-press time**, so sort by `t` rather than trusting file order. |
+| `timeline.jsonl` | one JSON object per line: `session_start`, `hotkey`, `state`, `overlay` (what it displayed), `overlay_visible` (shown/hidden and why), `window`, `capture`, `recording`, `session_end`. `t` = seconds since session start; hotkey/state events carry the **key-press time**, so sort by `t` rather than trusting file order. |
 | `session.json` | settings the session was recorded with |
 
 ```powershell

@@ -19,6 +19,7 @@ import ctypes
 import subprocess
 import sys
 import time
+from ctypes import wintypes
 
 import _spike
 from _spike import OUT, ROOT, verdict, win32
@@ -28,10 +29,14 @@ import numpy as np
 
 from adblock.actuators import audio_mute
 from adblock.actuators.overlay import WINDOW_TITLE
-from adblock.capture import FileReplaySource
+from adblock.capture import UNRELIABLE_MARKER, FileReplaySource
 from adblock.hotkeys import parse_hotkey
 
 KEYEVENTF_KEYUP = 0x2
+win32.user32.WindowFromPoint.restype = wintypes.HWND
+win32.user32.WindowFromPoint.argtypes = [wintypes.POINT]
+win32.user32.GetAncestor.restype = wintypes.HWND
+win32.user32.GetAncestor.argtypes = [wintypes.HWND, ctypes.c_uint]
 MODIFIER_VKS = {0x1: 0x12, 0x2: 0x11, 0x4: 0x10, 0x8: 0x5B}  # alt, ctrl, shift, win
 
 
@@ -42,6 +47,11 @@ def press(hotkey: str) -> None:
         win32.user32.keybd_event(code, 0, 0, 0)
     for code in [vk] + held[::-1]:
         win32.user32.keybd_event(code, 0, KEYEVENTF_KEYUP, 0)
+
+
+def top_window_at(x: int, y: int) -> int:
+    hwnd = win32.user32.WindowFromPoint(wintypes.POINT(x, y))
+    return (win32.user32.GetAncestor(hwnd, 2) or 0) if hwnd else 0  # GA_ROOT
 
 
 def overlay_window() -> int:
@@ -97,6 +107,8 @@ def main() -> int:
         checks["AD_chrome_muted"] = audio_mute.is_muted() is True
         checks["AD_overlay_visible_over_chrome"] = bool(win32.user32.IsWindowVisible(overlay)) and win32.window_rect(overlay) == win32.window_rect(chrome.hwnd)
         checks["AD_overlay_excluded_from_capture"] = win32.display_affinity(overlay) == win32.WDA_EXCLUDEFROMCAPTURE
+        left, top, right, bottom = win32.window_rect(chrome.hwnd)
+        checks["AD_overlay_is_what_the_viewer_sees"] = top_window_at((left + right) // 2, (top + bottom) // 2) == overlay
         checks["AD_focus_unchanged"] = win32.foreground_window() == before["foreground"]
         checks["AD_chrome_window_state_unchanged"] = win32.is_fullscreen(chrome.hwnd) == before["fullscreen"] and win32.window_rect(chrome.hwnd) == before["rect"]
         time.sleep(args.ad_seconds - 1.0)
@@ -125,7 +137,7 @@ def main() -> int:
     if not sessions:
         print("FAIL: no session folder was written")
         return 1
-    (sessions[-1] / "SYNTHETIC_LABELS.txt").write_text(
+    (sessions[-1] / UNRELIABLE_MARKER).write_text(
         "Recorded by tools/smoke_app.py: the GAME/AD labels are scripted key presses, not a viewer's judgement.\n"
         "Never train or evaluate a detector on this session.\n", encoding="utf-8")
     replay = FileReplaySource(sessions[-1])
@@ -146,13 +158,15 @@ def main() -> int:
     checks["frames_labelled_GAME_AD_GAME"] = bool(ad) and labels[0] == "GAME" and labels[-1] == "GAME"
     checks["picture_kept_changing_under_overlay"] = len(ad_diffs) >= 3 and sum(d > 0.3 for d in ad_diffs) >= 0.7 * len(ad_diffs)
     checks["overlay_content_logged"] = "overlay" in kinds
+    shown = [e for e in events if e["event"] == "overlay_visible"]
+    checks["overlay_visibility_logged_as_shown"] = bool(shown) and shown[0]["visible"] is True and shown[0]["reason"] == ""
 
     print(f"\nSession: {sessions[-1]}")
     print(f"  {len(frames)} frames over {span:.1f} s = {len(frames) / span if span else 0:.2f} fps; {len(ad)} labelled AD; "
           f"frame size {frames[0].image.shape[1]}x{frames[0].image.shape[0]}; mean JPEG {np.mean(sizes) / 1024:.1f} KB")
     print(f"  AD frame-to-frame diffs: {[round(d, 1) for d in ad_diffs]}")
     for event in events:
-        if event["event"] in ("state", "hotkey", "overlay", "capture", "window", "recording"):
+        if event["event"] in ("state", "hotkey", "overlay", "overlay_visible", "capture", "window", "recording"):
             print("  ", {k: v for k, v in event.items() if k != "wall"})
 
     tiles = []

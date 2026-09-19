@@ -134,7 +134,7 @@ Chrome was already in) and Chrome on the primary 1920×1080 screen.
 | # | Question | Result | What was observed |
 | --- | --- | --- | --- |
 | S1 | Can we capture YouTube TV's video from Chrome, or does DRM give black frames? | **PASS** — no black frames, maximized window and fullscreen | `spike_capture.py`: video area mean luminance 80–130, 0 flat-black frames, picture changing on every sample; PNGs checked by eye (live play with the FOX scorebug). Works through **Windows Graphics Capture** (window, by HWND) and **DXGI duplication** (dxcam). WGC at the full ~50 fps costs ~0.2 of a CPU core in Python; DXGI pulled at 2 fps costs ~0.01–0.05. `windows-capture`'s own DXGI session sometimes returns an **all-black first frame** (edge to edge, toolbar included — an empty frame, not DRM); dxcam never did. **Not tested: acceleration ON.** |
-| S2 | Does Chrome keep rendering video while our overlay covers it? | **PASS** — 60 s, fullscreen | `spike_occlusion.py`: frameless topmost no-activate Qt **tool** window (ex-style `0x08000088` = TOOLWINDOW \| NOACTIVATE \| TOPMOST, not layered) + `WDA_EXCLUDEFROMCAPTURE`, painted magenta, covering fullscreen Chrome. Under it the picture changed on 118/118 half-second ticks (WGC) and 117/118 (DXGI); WGC kept receiving **52.5 fps** (58.5 before) so Chrome never throttled; magenta fraction in every capture = 0.0000; foreground window stayed Chrome; Chrome stayed fullscreen with the same rect. `--disable-features=CalculateNativeWinOcclusion` was **not needed**. Contact sheet checked by eye: game clock runs 12:03 → 11:57 underneath the overlay. Quirk: `GetWindowDisplayAffinity` reads 0 while the window is hidden, though the setting survives hide/show — only verify it while shown. *Not yet run against a maximized (non-fullscreen) window; Phase 1's recorder shows this as a side effect.* |
+| S2 | Does Chrome keep rendering video while our overlay covers it? | **PASS** — 60 s, fullscreen | `spike_occlusion.py`: frameless topmost no-activate Qt **tool** window (ex-style `0x08000088` = TOOLWINDOW \| NOACTIVATE \| TOPMOST, not layered) + `WDA_EXCLUDEFROMCAPTURE`, painted magenta, covering fullscreen Chrome. Under it the picture changed on 118/118 half-second ticks (WGC) and 117/118 (DXGI); WGC kept receiving **52.5 fps** (58.5 before) so Chrome never throttled; magenta fraction in every capture = 0.0000; foreground window stayed Chrome; Chrome stayed fullscreen with the same rect. `--disable-features=CalculateNativeWinOcclusion` was **not needed**. Contact sheet checked by eye: game clock runs 12:03 → 11:57 underneath the overlay. Quirk: `GetWindowDisplayAffinity` reads 0 while the window is hidden, though the setting survives hide/show — only verify it while shown. **Maximized (non-fullscreen) window: also fine** — during Logan's first real break the Phase 1 overlay covered the 1920×1032 window for 3 min 26 s; from outside the process it was the top window at screen centre with affinity `0x11`, and the recorder's frames underneath kept a 0.24 s cadence with the picture changing in 188/189 sampled pairs. |
 | S3 | Can we mute only Chrome, cleanly? Does loopback keep hearing the stream while muted? | **PASS** | `spike_mute.py`: Chrome's audio process holds a session on **every playback device** (4 here, one active) → enumerate all active render endpoints, not just the default. Muting all 4 takes 11–16 ms; speakers' peak meter drops to exactly 0.0 and returns on unmute; no other app's mute flag changed. **Chrome's own session peak meter is pre-mute: it kept reading ~0.16–0.19 while muted** → a free, driver-independent loudness envelope of the muted stream. WASAPI loopback (Realtek): hears **nothing** during a *session* mute (RMS 0.0), hears the stream at full level during an *endpoint* mute (0.051 vs 0.043 unmuted). So loopback is useless for audio detection as long as we session-mute; the session meter, or a virtual-cable passthrough, are the options if Phase 5 ever needs audio. Windows persists per-app mute, so the app must unmute on exit and at startup. |
 | S4 | Does the Chrome window title on YouTube TV name the game? | **NO** | `spike_title.py`: title stayed `Home - YouTube TV - Google Chrome` for the whole game, windowed and fullscreen (it names the YouTube TV section, not the programme). → Game is chosen with `--game <team>` against ESPN's scoreboard (works today: 75 FBS games, lookup by abbreviation/name). Auto-match later by OCR of the scorebug, or of the player's own title ("Utah State at Utah" is drawn over the video when the controls are up). |
 
@@ -159,7 +159,7 @@ Each phase ends with something usable on a real game day.
 S1–S4. *Exit met:* PNGs of the game captured from Chrome (windowed + fullscreen); the
 overlay-covered capture kept updating for 60 s; Chrome mutes/unmutes from a script.
 
-**Phase 1 — One-key ad mode + recorder** — 🟡 **built 2026-09-19; exit needs a full game.**
+**Phase 1 — One-key ad mode + recorder** — 🟡 **built and tried by Logan 2026-09-19; exit needs a full game.**
 Global hotkey toggles AD mode: mute Chrome, show the overlay (placeholder: score + break
 timer). Recorder writes frames + toggle timeline to `sessions/<date>_<label>/`. *Exit:* a
 full game watched using only the hotkey — already better than mute-and-hide — and a labeled
@@ -174,8 +174,9 @@ What exists (`.\run.cmd --game <team>`, details in README.md):
   by the spoiler delay (45 s, simple snapshot ageing until Phase 2's per-play `wallclock`),
   and — **pulled forward from Phase 4 — the live PiP thumbnail**: without it the viewer
   can't tell when the game is back, so the "back to GAME" labels would be late and useless.
-- The overlay yields only to a *visible* foreground window that overlaps the stream; it stays
-  put for windows on the other monitor.
+- The overlay yields only when an ordinary app window is stacked **above** the stream window
+  and covers ≥ 100×100 px of it — decided by z-order, never by focus (topmost/tool windows,
+  the other monitor and the desktop don't count). Every show/hide is logged with its reason.
 - Recorder: WGC frames at ~4 fps (`minimum_update_interval` 240 ms → 4.18 fps measured),
   640 px wide, JPEG q75 ≈ 32–40 KB → ~1.5 GB per 3.5 h game (4 fps chosen over 2 so the
   evaluator can replay the state machine's sub-second rules faithfully; `--fps 2` exists).
@@ -193,9 +194,27 @@ What exists (`.\run.cmd --game <team>`, details in README.md):
 - `FileReplaySource` replays a session through the live-capture interface;
   `tools/session_info.py` is the first consumer (segments, gaps, label-vs-timeline check,
   contact sheet per key press). `tools/smoke_app.py` runs the real app end to end with
-  injected key presses (16 checks, all pass); its sessions are marked `SYNTHETIC_LABELS`.
+  injected key presses (18 checks, all pass); its sessions are marked `UNRELIABLE_LABELS.txt`
+  (any session whose labels shouldn't be trusted gets that file; the evaluator skips them).
+
+First hands-on run (Logan, physical keyboard, 20 min, `sessions/2026-09-19_utah-hands-on`):
+physical F9 → AD in 42–43 ms and back in 15–16 ms, **including while the invisible
+GameInputSvc window held the foreground**; a fullscreen → windowed → fullscreen toggle
+mid-session cost no frames (max gap 0.49 s); one genuine break labelled (end of the 1st
+quarter, 3 min 26 s). He came back on the **return bumper** — mountain shot plus a sponsor
+card, no scorebug yet, FOX CFB corner bug present — which he could only time from the PiP.
+The session is marked `UNRELIABLE_LABELS.txt` with its usable range, because nobody was
+pressing during its first 11 minutes and one press was a test tap during live play.
 
 Learned while building it:
+
+- **Focus is the wrong signal for "the user put something in front of the stream".** Logan's
+  first press muted Chrome but showed no overlay: the rule compared the *foreground* window's
+  rectangle with the stream's, and e.g. the desktop window spans both monitors while sitting
+  behind everything. Z-order is the right signal (rule above).
+- **ESPN's CDN can step backwards**: the status went `0:04 - 1st` → `End of 1st` →
+  `0:04 - 1st` on consecutive polls. The poller now drops answers that move the game
+  backwards (period/clock ordering), giving in after six in a row.
 
 - **An invisible system window can own the foreground.** `GameInputSvc.exe` (SYSTEM) held it
   with a hidden 136×39 window for minutes while fullscreen Chrome was being watched. Any

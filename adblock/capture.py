@@ -20,6 +20,9 @@ import cv2
 import numpy as np
 
 
+UNRELIABLE_MARKER = "UNRELIABLE_LABELS.txt"
+
+
 @dataclass
 class Frame:
     image: np.ndarray  # BGR, uint8
@@ -120,10 +123,16 @@ class FileReplaySource:
         return json.loads((self.session_dir / "session.json").read_text(encoding="utf-8"))
 
     @property
-    def synthetic_labels(self) -> bool:
-        """True for sessions recorded by tools/smoke_app.py: scripted key presses, not a
-        viewer's judgement. Evaluation and training must skip these."""
-        return (self.session_dir / "SYNTHETIC_LABELS.txt").exists()
+    def unreliable_labels(self) -> str:
+        """Why this session's GAME/AD labels must not be trusted ("" = they are fine).
+
+        A session is marked by dropping an UNRELIABLE_LABELS.txt into its folder: the smoke
+        test does it for its scripted key presses; do the same by hand for a game where
+        nobody was pressing the hotkey. Evaluation and training must skip marked sessions
+        (or honour the usable time range the note describes).
+        """
+        marker = self.session_dir / UNRELIABLE_MARKER
+        return marker.read_text(encoding="utf-8").strip() if marker.exists() else ""
 
     def events(self) -> list[dict]:
         """The timeline: state changes, hotkey presses, window/capture changes."""
