@@ -157,6 +157,17 @@ def monitor_rect(hwnd: int) -> Rect:
     return (r.left, r.top, r.right, r.bottom)
 
 
+def is_on_screen(hwnd: int) -> bool:
+    """A window the user can actually see. Invisible helper windows can hold the foreground:
+    on 2026-09-19 GameInputSvc.exe's hidden 136x39 'GameInputServiceWindow' (a SYSTEM
+    service) sat there for minutes while fullscreen Chrome was what the user was watching."""
+    return bool(user32.IsWindowVisible(hwnd)) and not is_minimized(hwnd) and not is_cloaked(hwnd)
+
+
+def rects_overlap(a: Rect, b: Rect) -> bool:
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
 def is_cloaked(hwnd: int) -> bool:
     cloaked = wintypes.DWORD(0)
     hr = dwmapi.DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, ctypes.byref(cloaked), ctypes.sizeof(cloaked))

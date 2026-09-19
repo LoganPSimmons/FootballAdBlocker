@@ -11,7 +11,9 @@ Endpoints used:
 
 from __future__ import annotations
 
+import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 
 import httpx
@@ -123,3 +125,56 @@ class EspnClient:
             if game.away.matches(query) or game.home.matches(query):
                 return game
         return None
+
+
+class ScorePoller(threading.Thread):
+    """Polls one game's score in the background and serves it *delayed* (spoiler guard).
+
+    YouTube TV runs roughly 30-60 s behind the stadium while ESPN's feed is close to live,
+    so the newest snapshot could show a touchdown the viewer hasn't seen yet. ``current()``
+    therefore returns the newest snapshot that is at least ``delay_s`` old - which means
+    nothing at all for the first ``delay_s`` after start-up. Phase 2 replaces this with
+    per-play ``wallclock`` filtering.
+    """
+
+    def __init__(self, query: str, delay_s: float = 45.0, interval_s: float = 20.0) -> None:
+        super().__init__(name="espn", daemon=True)
+        self.query, self.delay_s, self.interval_s = query, delay_s, interval_s
+        self.status = f"looking up '{query}' on ESPN ..."
+        self.game_name = ""
+        self._history: deque[GameSnapshot] = deque(maxlen=64)  # 64 * 20 s: far longer than any delay
+        self._lock = threading.Lock()
+        self._halt = threading.Event()  # not "_stop": threading.Thread uses that name internally
+
+    def stop(self) -> None:
+        self._halt.set()
+
+    def current(self) -> GameSnapshot | None:
+        cutoff = time.time() - self.delay_s
+        with self._lock:
+            history = list(self._history)
+        return next((s for s in reversed(history) if s.fetched_at <= cutoff), None)
+
+    def run(self) -> None:
+        client = EspnClient()
+        event_id = ""
+        try:
+            while not self._halt.is_set():
+                wait = self.interval_s
+                try:
+                    if not event_id:
+                        game = client.find_game(self.query)
+                        if game is None:
+                            self.status, wait = f"no game today matches '{self.query}'", 120.0
+                        else:
+                            event_id, self.game_name = game.event_id, game.name
+                    if event_id:
+                        snapshot = client.game(event_id)
+                        with self._lock:
+                            self._history.append(snapshot)
+                        self.status = ""
+                except (httpx.HTTPError, KeyError, ValueError) as exc:  # offline, or ESPN changed shape
+                    self.status = f"ESPN unavailable ({type(exc).__name__})"
+                self._halt.wait(wait)
+        finally:
+            client.close()

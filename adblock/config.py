@@ -1,0 +1,47 @@
+"""Settings: defaults here, overridden by config.toml (optional), overridden by the command line."""
+
+from __future__ import annotations
+
+import tomllib
+from dataclasses import dataclass, fields
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_PATH = ROOT / "config.toml"
+
+
+@dataclass
+class Config:
+    hotkey: str = "F9"  # toggles GAME <-> AD; works while Chrome is fullscreen and focused
+    quit_hotkey: str = "ctrl+shift+F9"  # clean exit without leaving fullscreen
+    title_contains: str = "YouTube TV"  # how the stream's Chrome window is recognised
+    game: str = ""  # team to look up on ESPN for the score, e.g. "utah" or "USU"
+    label: str = ""  # session folder label; defaults to the game, then "session"
+    stream_delay_s: float = 45.0  # spoiler guard: show ESPN data only once it is this old
+    pip: bool = True  # small live thumbnail on the overlay, to see when the game is back
+    record: bool = True
+    fps: float = 4.0  # recorded frames per second (2-4). ~40 KB per frame: 4 fps is ~1.7 GB per 3.5 h game
+    frame_width: int = 640  # 640x360 when the stream is fullscreen 16:9
+    jpeg_quality: int = 75
+    sessions_dir: str = "sessions"  # relative to the project root unless absolute
+
+    @property
+    def sessions_path(self) -> Path:
+        path = Path(self.sessions_dir)
+        return path if path.is_absolute() else ROOT / path
+
+
+def load(path: Path | None = None) -> Config:
+    """Config from a TOML file. A missing default file just means defaults; typos are errors."""
+    explicit = path is not None
+    path = path or DEFAULT_PATH
+    if not path.exists():
+        if explicit:
+            raise FileNotFoundError(path)
+        return Config()
+    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    known = {f.name for f in fields(Config)}
+    unknown = sorted(set(data) - known)
+    if unknown:
+        raise ValueError(f"{path.name}: unknown setting(s) {unknown}; valid settings are {sorted(known)}")
+    return Config(**data)
