@@ -32,6 +32,10 @@ from adblock.detect.fusion import AD, GAME, Fusion, FusionSettings
 RELEARN_EVERY_S = 30.0
 FORGET_AFTER_S = 45 * 60.0
 AD_TAG_AFTER_S = 10.0  # a forced AD the evidence still contradicts after this long tags frames as ads
+TRUST_AFTER_S = 60.0  # on-screen time a region learned from viewer-tagged frames needs before it counts
+ESTABLISHED_S = 300.0  # on-screen time after which a region is never purged as ambiguous
+AMBIGUOUS = (0.35, 0.75)  # a useful graphic scores ~0.9 or ~0 on the history, rarely in between
+MAX_AMBIGUOUS_SHARE = 0.15
 AREA_MIN_S, AREA_MIN_FRAMES = 8.0, 24
 
 Rect = tuple[int, int, int, int]
@@ -85,9 +89,14 @@ class VideoArea:
 @dataclass
 class TrackedRegion:
     region: scorebug.Region
-    seen_s: float  # cumulative seconds it has been on screen
     last_seen: float
     score: float = 0.0
+    seen_s: float = 0.0  # cumulative seconds it has been on screen since it was learned
+    seeded: bool = False  # learned from viewer-tagged frames: has to earn trust (TRUST_AFTER_S)
+
+    @property
+    def trusted(self) -> bool:
+        return not self.seeded or self.seen_s >= TRUST_AFTER_S
 
 
 @dataclass
@@ -162,7 +171,8 @@ class Detector:
             if tracked.score >= scorebug.PRESENT:
                 tracked.seen_s += elapsed
                 tracked.last_seen = t
-        game_like = any(tr.score >= scorebug.PRESENT for tr in library) if library else None
+        trusted = [tr for tr in library if tr.trusted]
+        game_like = any(tr.score >= scorebug.PRESENT for tr in trusted) if trusted else None
         state = self.fusion.update(game_like, t)
 
         learner.add(gray, edges, t, self._tag(t))
@@ -189,9 +199,12 @@ class Detector:
                 same = next((tr for tr in library if _overlap(tr.region.bbox, region.bbox) > 0.5), None)
                 if same is not None:
                     same.region = region  # same graphic, fresher pixels
-                else:
-                    library.append(TrackedRegion(region, float(mask.seed_frames), t, region.score(flat)))
-        library[:] = [tr for tr in library if t - tr.last_seen < FORGET_AFTER_S]
+                elif not _ambiguous(learner, region):
+                    library.append(TrackedRegion(region, t, region.score(flat), seeded=mask.seeded))
+        # Young regions must keep separating the history cleanly; established ones are never
+        # purged (the corner bug must survive a 20-minute halftime whatever it looks like there).
+        library[:] = [tr for tr in library if t - tr.last_seen < FORGET_AFTER_S
+                      and (tr.seen_s >= ESTABLISHED_S or not _ambiguous(learner, tr.region))]
         after = [tr.region.bbox for tr in library]  # "changed" = a graphic came or went, not a box that wobbled a pixel
         return len(after) != len(before) or any(_overlap(a, b) < 0.8 for a, b in zip(after, before))
 
@@ -206,11 +219,22 @@ class Detector:
             key = (image.shape[1], image.shape[0], rect, gray.shape)
             for tracked in self._library.get(key, []):
                 present = tracked.score >= scorebug.PRESENT
+                colour = (150, 150, 150) if not tracked.trusted else (80, 255, 80) if present else (60, 60, 255)
                 flat = canvas.reshape(-1, 3)
-                flat[tracked.region.on] = (80, 255, 80) if present else (60, 60, 255)
+                flat[tracked.region.on] = colour
                 x0, y0, x1, y1 = tracked.region.bbox
-                cv2.rectangle(canvas, (x0, y0), (x1, y1), (80, 255, 80) if present else (60, 60, 255), 1)
+                cv2.rectangle(canvas, (x0, y0), (x1, y1), colour, 1)
             return canvas
+
+
+def _ambiguous(learner: scorebug.MaskLearner, region: scorebug.Region) -> bool:
+    """True if the region often scores in the no-man's-land between "on screen" and "gone" -
+    the signature of scene content (a studio set, a crowd) rather than a broadcast graphic,
+    and the kind of region that matches a busy commercial by chance."""
+    if len(learner) < 60:
+        return False
+    scores = learner.history_scores(region)
+    return float(((scores >= AMBIGUOUS[0]) & (scores < AMBIGUOUS[1])).mean()) > MAX_AMBIGUOUS_SHARE
 
 
 def _overlap(a: Rect, b: Rect) -> float:

@@ -87,6 +87,7 @@ class Mask:
     shape: tuple[int, int]
     regions: list[Region]
     seed_frames: int  # how many game-like frames it was learned from
+    seeded: bool = False  # learned from frames the viewer tagged as GAME (may be scene content, not graphics)
 
     def scores(self, edges: np.ndarray) -> list[float]:
         flat = edges.reshape(-1)
@@ -227,7 +228,18 @@ class MaskLearner:
         persistent = np.zeros(self.shape, bool)
         persistent[candidates] = persistent_c
         regions = self._regions(persistent, seed)
-        return Mask(self.shape, regions, int(seed.sum())) if regions else None
+        return Mask(self.shape, regions, int(seed.sum()), seeded) if regions else None
+
+    def history_scores(self, region: Region) -> np.ndarray:
+        """The region's score on every frame of the history (same formula as Region.score)."""
+        pixels = np.zeros(self.shape, bool)
+        flat = pixels.reshape(-1)
+        flat[region.on] = flat[region.off] = True
+        series = self._series(pixels)
+        is_on = np.isin(np.flatnonzero(flat), region.on)
+        hit = series[:, is_on].mean(axis=1)
+        noise = series[:, ~is_on].mean(axis=1) if (~is_on).any() else 0.0
+        return hit - noise
 
     def _regions(self, persistent: np.ndarray, seed: np.ndarray) -> list[Region]:
         height, width = self.shape

@@ -79,14 +79,52 @@ class SyntheticBroadcast(unittest.TestCase):
         self.assertEqual(tv.detector.state, AD)
         tv.detector.correct(GAME)  # ...until the viewer says "that's the game"
         held_from = tv.t
-        seen = tv.play(60, scorebug, layout="second half")
+        seen = tv.play(45, scorebug, layout="second half")
+        self.assertEqual(seen.override, GAME, "learned by now, but a viewer-seeded region has to earn trust first")
+        seen = tv.play(75, scorebug, layout="second half")
         self.assertEqual(tv.states_between(held_from, tv.t), {GAME})
-        self.assertIsNone(seen.override, "new graphics learned from the tagged frames, so automatic again")
+        self.assertIsNone(seen.override, "new graphics learned from the tagged frames and trusted: automatic again")
 
         break_start = tv.t
         tv.play(15)
         self.assertEqual(tv.detector.state, AD, "and the next break is caught using the new graphics")
         self.assertEqual(tv.states_between(break_start, break_start + 4.5), {GAME})
+
+    def test_scene_content_tagged_as_game_never_vouches_for_an_ad(self):
+        """Halftime, 2026-09-19: the viewer said "that's the game" over a studio show without
+        any network logo; the learner took the studio set for graphics, and one of those
+        regions then matched a busy truck commercial - GAME in the middle of an ad break."""
+        tv = Broadcast()
+        tv.play(120, scorebug, corner_bug)
+        tv.play(20)  # break -> AD
+        self.assertEqual(tv.detector.state, AD)
+
+        studio = texture()  # a locked-off studio shot: lots of edges that simply never move
+
+        def studio_show(seconds):
+            for _ in range(int(seconds * FPS)):
+                frame = studio.copy()
+                frame[100:200, 200:440] = texture()[100:200, 200:440]  # the presenters move a bit
+                seen = tv.detector.process(frame, tv.t, fullscreen=True)
+                tv.log.append((tv.t, seen.state))
+                tv.t += 1 / FPS
+
+        tv.detector.correct(GAME)  # "I want to watch this"
+        studio_show(90)
+        tv.detector.correct(AD)  # commercials start: the viewer says so
+        ads_from = tv.t
+        tv.play(30)
+        for _ in range(10 * FPS):  # ...one of which happens to look like part of that studio
+            frame = texture()
+            frame[:, :320] = studio[:, :320]
+            tv.log.append((tv.t, tv.detector.process(frame, tv.t, fullscreen=True).state))
+            tv.t += 1 / FPS
+        tv.play(30)
+        self.assertEqual(tv.states_between(ads_from + 2, tv.t), {AD}, "nothing learned from the studio may call an ad GAME")
+
+        back = tv.t
+        tv.play(5, scorebug, corner_bug)
+        self.assertEqual(tv.states_between(back + 1, tv.t), {GAME}, "the real graphics still bring the game back")
 
     def test_paused_picture_teaches_nothing(self):
         tv = Broadcast()
