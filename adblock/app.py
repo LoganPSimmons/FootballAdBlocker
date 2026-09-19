@@ -202,6 +202,9 @@ class Controller(QtCore.QObject):
     # --- heartbeat --------------------------------------------------------------------------
     def tick(self) -> None:
         now = time.perf_counter()
+        if self.writer and (self.writer.dir / "STOP").exists():  # polite quit request from another process
+            self.app.quit()
+            return
         if self.stream and (not win32.is_window(self.stream.hwnd) or (self.source and self.source.closed)):
             self.detach("window closed")
         if self.stream is None and now - self.last_attach_try >= REATTACH_EVERY_S:
