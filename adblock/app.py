@@ -42,6 +42,7 @@ REMUTE_EVERY_S = 2.0
 NO_FRAMES_S = 2.0  # no analysed frame for this long = the detector can't see the stream
 REMEMBER_EVERY_S = 300.0
 MEMORY_FILE = config_module.ROOT / "learned" / "graphics.npz"
+APP_ID = "Logan.FootballAdBlocker"  # Windows taskbar identity; the shortcuts carry the same one
 
 log = logging.getLogger("adblock")
 _console_handler = None  # keeps the ctypes callback alive for the life of the process
@@ -58,8 +59,8 @@ def setup_logging() -> None:
     handlers: list[logging.Handler] = [logging.handlers.RotatingFileHandler(folder / "app.log", maxBytes=1_000_000, backupCount=3, encoding="utf-8")]
     if sys.stdout is not None:
         handlers.append(logging.StreamHandler(sys.stdout))
-    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S", handlers=handlers)
-    logging.getLogger("httpx").setLevel(logging.WARNING)  # one line per ESPN poll is noise
+    logging.basicConfig(level=logging.WARNING, format="[%(asctime)s] %(message)s", datefmt="%H:%M:%S", handlers=handlers)
+    log.setLevel(logging.INFO)  # ours at INFO; libraries (httpx per poll, open_clip's model chatter) only when it matters
     sys.excepthook = lambda kind, value, trace: log.error("unhandled error", exc_info=(kind, value, trace))
 
 
@@ -464,6 +465,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"config error: {exc}")
         return 2
 
+    # One taskbar identity for the running window and the shortcuts (tools/install_shortcuts.py):
+    # without it the window shows up as a second, Python-branded button next to a pinned shortcut.
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
     app = QtWidgets.QApplication([])  # first: Qt makes the process per-monitor DPI aware
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("Football Ad Blocker")

@@ -10,5 +10,7 @@ pip = true
 auto = true                    # hide ads automatically; false = you toggle with the hotkey, the detector only watches
 enter_ad_s = 5.0               # graphics missing this long -> ad. Higher = safer for live play, more ad leaks
 exit_ad_frames = 3             # frames with the graphics back -> game (~0.75 s)
+close_to_tray = false          # true: closing the control window hides it to the tray instead of quitting
+scene = true                   # use the image model when requirements-ml.txt is installed
 record = true
 fps = 4.0

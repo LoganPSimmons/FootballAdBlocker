@@ -13,16 +13,20 @@ is the labelled data the later, smarter detector is trained and measured on.
 
 ## Use
 
-Double-click **`start_ui.cmd`** (no console), or from PowerShell with the log on screen:
+Start it from the **"Football Ad Blocker" shortcut** on the Desktop or in the Start menu (no
+console; right-click it to pin it to the taskbar or Start - Windows doesn't let programs pin
+themselves). `start_ui.cmd` does the same; from PowerShell with the log on screen:
 
 ```powershell
 .\run.cmd
+.\.venv\Scripts\python.exe tools\install_shortcuts.py            # (re)create the shortcuts; --remove deletes them
 ```
 
 A small **control window** opens (on the screen the game is *not* on, if you have two) and a
-**tray icon** appears: green dot = GAME, red = AD. Closing the window does not stop anything —
-the blocker keeps running from the tray. **Quit** (window, tray menu or Ctrl+Shift+F9) stops it
-and always leaves Chrome unmuted.
+**tray icon** appears: green dot = GAME, red = AD. **Closing the window quits the app** - every
+process, the image model's GPU memory, the hotkeys - and always leaves Chrome unmuted; so do
+Quit in the tray menu and Ctrl+Shift+F9. Minimize it to get it out of sight while it works.
+(`close_to_tray = true` in `config.toml` makes closing hide it to the tray instead.)
 
 | When | What to do |
 | --- | --- |

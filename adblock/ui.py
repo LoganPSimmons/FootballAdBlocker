@@ -1,8 +1,9 @@
 """Control window + tray icon.
 
-Closing the window does not stop anything: the blocker keeps running from the tray (that is
-the point - the window is for looking in and correcting, not for babysitting). Quit is in
-the window and in the tray menu, and always leaves Chrome unmuted.
+Closing the window quits the app - every thread, the image model, the hotkeys - and leaves
+Chrome unmuted; that is what a viewer expects of a close button (Logan did). Minimize is the
+way to get the window out of sight while it keeps working. ``close_to_tray = true`` in
+config.toml restores the other behaviour: close hides the window, the tray icon keeps it alive.
 """
 
 from __future__ import annotations
@@ -234,9 +235,13 @@ class ControlWindow(QtWidgets.QWidget):
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         save_state(window_pos=[self.x(), self.y()])
-        event.ignore()  # closing the window leaves the blocker running in the tray
-        self.hide()
-        self.hidden_to_tray.emit()
+        if self.controller.config.close_to_tray:
+            event.ignore()  # opted in: the blocker keeps running from the tray icon
+            self.hide()
+            self.hidden_to_tray.emit()
+        else:
+            event.accept()
+            self.controller.app.quit()  # shutdown() unmutes Chrome and saves the session
 
 
 class Tray(QtCore.QObject):
@@ -296,7 +301,8 @@ class Tray(QtCore.QObject):
 
 
 def build_ui(app: QtWidgets.QApplication, controller) -> tuple[ControlWindow, Tray]:
-    app.setWindowIcon(dot_icon(COLOURS[GAME]))
+    icon_file = config_module.ROOT / "assets" / "app.ico"
+    app.setWindowIcon(QtGui.QIcon(str(icon_file)) if icon_file.exists() else dot_icon(COLOURS[GAME]))
     window = ControlWindow(controller)
     tray = Tray(controller, window)
     window.show()

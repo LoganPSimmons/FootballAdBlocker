@@ -23,6 +23,7 @@ class Config:
     scene: bool = True  # also use the image model (needs requirements-ml.txt; ignored if not installed)
     enter_ad_s: float = 5.0  # broadcast graphics missing this long -> AD (higher = safer for live play)
     exit_ad_frames: int = 3  # consecutive frames with graphics back -> GAME (~0.75 s at 4 fps)
+    close_to_tray: bool = False  # False: closing the control window quits the app. True: it keeps running in the tray
     record: bool = True
     fps: float = 4.0  # recorded frames per second (2-4). ~40 KB per frame: 4 fps is ~1.7 GB per 3.5 h game
     frame_width: int = 640  # 640x360 when the stream is fullscreen 16:9

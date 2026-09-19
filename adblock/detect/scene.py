@@ -49,12 +49,11 @@ MARGIN = 0.15  # |P(broadcast) - 0.5| below this = no opinion
 
 
 def available() -> bool:
-    try:
-        import open_clip  # noqa: F401
-        import torch  # noqa: F401
-    except ImportError:
-        return False
-    return True
+    """Installed? Answered without importing anything: importing PyTorch takes seconds, and
+    this is asked on the UI thread at start-up. The real import happens on the watcher's thread."""
+    from importlib.util import find_spec
+
+    return find_spec("torch") is not None and find_spec("open_clip") is not None
 
 
 def verdict_from(scores) -> bool | None:
