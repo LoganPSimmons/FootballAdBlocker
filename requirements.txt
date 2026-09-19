@@ -1,0 +1,22 @@
+# Football Ad Blocker - Phase 0/1 dependencies (Python 3.11, Windows 11).
+# Install:  .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+# Pinned to the versions the Phase 0 spikes passed with on 2026-09-19.
+# Later phases add: torch, open_clip_torch, onnxruntime-gpu (Phase 5) - deliberately not installed yet.
+
+# Capture
+windows-capture==2.0.1   # Windows Graphics Capture of the Chrome window (primary path)
+dxcam==0.3.0             # DXGI desktop duplication - only tools/spike_*.py use it now
+
+# Vision / frames
+numpy==2.4.6
+opencv-python==5.0.0.93
+
+# Audio
+pycaw==20251023          # per-app audio session mute
+soundcard==0.4.6         # WASAPI loopback recording - only tools/spike_mute.py uses it
+
+# Overlay
+PySide6==6.11.2
+
+# Data
+httpx==0.28.1
