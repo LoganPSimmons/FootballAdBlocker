@@ -27,6 +27,8 @@ def main() -> int:
     parser.add_argument("--frame", type=Path, help="image to use as the live thumbnail")
     parser.add_argument("--out", type=Path, default=ROOT / "spike_out" / "overlay_preview.png")
     parser.add_argument("--size", default="1920x1080")
+    parser.add_argument("--game", help="team whose live game fills the stats panel (fetched from ESPN, delayed --delay s)")
+    parser.add_argument("--delay", type=float, default=45.0)
     args = parser.parse_args()
 
     app = QtWidgets.QApplication([])  # noqa: F841 - must exist before any widget
@@ -37,6 +39,21 @@ def main() -> int:
     overlay.set_score("USU 0   @   #17 UTAH 7", "10:37 - 1st   ·   FOX")
     if args.frame:
         overlay.set_thumbnail(cv2.imread(str(args.frame)))
+    if args.game:
+        import time
+
+        from adblock.data.espn import EspnClient
+
+        client = EspnClient()
+        game = client.find_game(args.game)
+        if game is None:
+            print(f"no game today matches {args.game!r}")
+            return 1
+        stats = client.stats(game.event_id).delayed(time.time() - args.delay)
+        client.close()
+        overlay.set_score(stats.score_line(), f"{stats.status_detail}   ·   {game.network}")
+        overlay.set_stats(stats)
+        overlay.stats_panel.show()
     args.out.parent.mkdir(exist_ok=True)
     overlay.grab().save(str(args.out))
     print(f"wrote {args.out}")

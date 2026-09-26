@@ -16,8 +16,9 @@ import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from adblock import config as config_module
-from adblock.data.espn import EspnClient, GameSnapshot
+from adblock.data.espn import EspnClient, GameSnapshot, GameStats
 from adblock.detect.detector import AD, GAME
+from adblock.stats_widgets import BOTH, TeamComparison, TeamPanel, WinOddsChart, recent_plays, scoring_summary
 
 Qt = QtCore.Qt
 STATE_FILE = config_module.ROOT / "ui_state.json"  # last game picked, window position (git-ignored)
@@ -39,6 +40,15 @@ QPushButton:disabled { color: #56616e; background: #141a21; border-color: #222b3
 #sayAd:enabled { border-color: #d2453d; } #sayGame:enabled { border-color: #2e9f5b; }
 QComboBox { color: #e8edf2; background: #1b2530; border: 1px solid #3a4856; border-radius: 6px; padding: 6px; font: 14px 'Segoe UI'; }
 QComboBox QAbstractItemView { color: #e8edf2; background: #1b2530; selection-background-color: #26405a; }
+QTableWidget { color: #e8edf2; background: #121a22; alternate-background-color: #172029; border: 1px solid #2a3440;
+               border-radius: 6px; font: 13px 'Segoe UI'; gridline-color: #2a3440; }
+QHeaderView::section { color: #9fb0c3; background: #1b2530; border: none; padding: 4px; font: 600 12px 'Segoe UI'; }
+#statsScore { color: white; font: 700 26px 'Segoe UI'; }
+#statsStatus, #leaders { color: #9fb0c3; font: 13px 'Segoe UI'; }
+#groupTitle { color: #66768a; font: 600 12px 'Segoe UI'; letter-spacing: 2px; }
+#panelTitle { color: #66768a; font: 600 12px 'Segoe UI'; letter-spacing: 2px; margin-top: 6px; }
+#plays, #scoring { color: #d9e1ea; font: 13px 'Segoe UI'; }
+QScrollArea { border: none; background: #0f141a; }
 """
 
 
@@ -138,7 +148,13 @@ class ControlWindow(QtWidgets.QWidget):
         folder.clicked.connect(lambda: os.startfile(controller.config.sessions_path))  # noqa: S606 - our own folder
         quit_button = QtWidgets.QPushButton("Quit")
         quit_button.clicked.connect(controller.app.quit)
+        self.stats_window = StatsWindow(controller)
+        stats_button = QtWidgets.QPushButton("Game stats")
+        stats_button.setToolTip("Win odds after every play, both teams compared or one team's numbers, scoring and recent plays "
+                                "- all held back by the spoiler delay.")
+        stats_button.clicked.connect(self.show_stats)
         footer = QtWidgets.QHBoxLayout()
+        footer.addWidget(stats_button)
         footer.addWidget(relearn)
         footer.addWidget(folder)
         footer.addStretch(1)
@@ -169,6 +185,16 @@ class ControlWindow(QtWidgets.QWidget):
         self.timer.timeout.connect(self.refresh)
         self.timer.start(500)
         self.refresh()
+
+    def show_stats(self) -> None:
+        window = self.stats_window
+        if not window.isVisible():
+            window.move(self.x() + self.width() + 16, self.y())
+            if QtGui.QGuiApplication.screenAt(window.pos()) is None:
+                window.move(self.x(), self.y())
+        window.show()
+        window.raise_()
+        window.activateWindow()
 
     def move_off_the_stream(self) -> None:
         """First launch: open on a screen the stream is *not* on, if there is one. A window in
@@ -241,7 +267,121 @@ class ControlWindow(QtWidgets.QWidget):
             self.hidden_to_tray.emit()
         else:
             event.accept()
+            self.stats_window.close()
             self.controller.app.quit()  # shutdown() unmutes Chrome and saves the session
+
+
+class StatsWindow(QtWidgets.QWidget):
+    """Game stats, held back by the spoiler delay: win odds after every play, both teams side
+    by side or one team's own numbers and players, the scoring summary and the last plays."""
+
+    def __init__(self, controller) -> None:
+        super().__init__()
+        self.controller = controller
+        self.setObjectName("window")
+        self.setWindowTitle("Game stats - Football Ad Blocker")
+        self.setStyleSheet(STYLE)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        self.resize(760, 900)
+        self.shown_key: tuple | None = None
+        self.perspective = BOTH
+
+        self.score = QtWidgets.QLabel("Game stats")
+        self.score.setObjectName("statsScore")
+        self.status = QtWidgets.QLabel("Pick a game in the main window; stats appear once they are older than the spoiler delay.")
+        self.status.setObjectName("statsStatus")
+        self.status.setWordWrap(True)
+        self.picker = QtWidgets.QComboBox()
+        self.picker.addItem("Both teams", BOTH)
+        self.picker.activated.connect(self.pick)
+        top = QtWidgets.QHBoxLayout()
+        top.addWidget(self.score, 1)
+        top.addWidget(self.picker)
+
+        self.odds = WinOddsChart()
+        self.odds.setFixedHeight(230)
+        self.comparison = TeamComparison()
+        self.team = TeamPanel()
+        self.stack = QtWidgets.QStackedWidget()
+        self.stack.addWidget(self.comparison)
+        self.stack.addWidget(self.team)
+        self.scoring = QtWidgets.QLabel()
+        self.scoring.setObjectName("scoring")
+        self.scoring.setWordWrap(True)
+        self.plays = QtWidgets.QLabel()
+        self.plays.setObjectName("plays")
+        self.plays.setWordWrap(True)
+
+        def title(text: str) -> QtWidgets.QLabel:
+            label = QtWidgets.QLabel(text)
+            label.setObjectName("panelTitle")
+            return label
+
+        content = QtWidgets.QWidget()
+        content.setObjectName("window")
+        body = QtWidgets.QVBoxLayout(content)
+        body.setContentsMargins(0, 0, 8, 0)
+        body.setSpacing(8)
+        body.addWidget(title("WIN ODDS AFTER EVERY PLAY"))
+        body.addWidget(self.odds)
+        body.addWidget(title("TEAM STATS"))
+        body.addWidget(self.stack)
+        body.addWidget(title("SCORING"))
+        body.addWidget(self.scoring)
+        body.addWidget(title("LAST PLAYS"))
+        body.addWidget(self.plays)
+        body.addStretch(1)
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(content)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 10, 14)
+        layout.setSpacing(10)
+        layout.addLayout(top)
+        layout.addWidget(self.status)
+        layout.addWidget(scroll, 1)
+
+        self.timer = QtCore.QTimer(self)
+        self.timer.timeout.connect(self.refresh)
+        self.timer.start(2000)
+
+    def pick(self, index: int) -> None:
+        self.perspective = self.picker.itemData(index) or BOTH
+        self.shown_key = None
+        self.refresh()
+
+    def showEvent(self, event: QtGui.QShowEvent) -> None:  # noqa: N802 - Qt name
+        self.shown_key = None
+        self.refresh()
+        super().showEvent(event)
+
+    def refresh(self) -> None:
+        if not self.isVisible():
+            return
+        stats: GameStats | None = self.controller.stats_current()
+        if stats is None:
+            waiting = self.controller.stats_status()
+            self.status.setText(waiting)
+            return
+        key = (stats.event_id, stats.fetched_at, len(stats.plays), self.perspective)
+        if key == self.shown_key:
+            return
+        self.shown_key = key
+        if self.picker.count() == 1:
+            self.picker.addItem(f"{stats.away.location} {stats.away.name}", stats.away.abbreviation)
+            self.picker.addItem(f"{stats.home.location} {stats.home.name}", stats.home.abbreviation)
+        self.score.setText(stats.score_line())
+        self.status.setText(f"{stats.status_detail}   ·   {self.controller.config.stream_delay_s:.0f} s behind the feed on purpose (spoiler guard)")
+        self.odds.set_stats(stats, self.perspective)
+        if self.perspective == BOTH:
+            self.comparison.set_stats(stats)
+            self.stack.setCurrentWidget(self.comparison)
+        else:
+            self.team.set_stats(stats, self.perspective)
+            self.stack.setCurrentWidget(self.team)
+        self.scoring.setText(scoring_summary(stats))
+        self.plays.setText(recent_plays(stats))
 
 
 class Tray(QtCore.QObject):
@@ -252,6 +392,7 @@ class Tray(QtCore.QObject):
         self.icon = QtWidgets.QSystemTrayIcon(self.icons[GAME])
         menu = QtWidgets.QMenu()
         menu.addAction("Open Football Ad Blocker", self.open)
+        menu.addAction("Game stats", window.show_stats)
         menu.addSeparator()
         self.say_ad = menu.addAction("That's an AD - hide it", lambda: controller.correct(AD, "tray"))
         self.say_game = menu.addAction("That's the GAME - show it", lambda: controller.correct(GAME, "tray"))

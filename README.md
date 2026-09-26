@@ -36,6 +36,12 @@ Quit in the tray menu and Ctrl+Shift+F9. Minimize it to get it out of sight whil
 | An ad is showing | **"That's an AD — hide it"** in the window or tray menu, or **F9** |
 | It seems confused about this broadcast | **Relearn graphics** in the window |
 | You'd rather toggle by hand | Untick **Hide ads automatically**: the detector keeps watching and logging, F9 toggles |
+| You want the numbers | **Game stats** in the window or the tray menu: win odds after every play, both teams side by side or one team's own stats, leaders and players, the scoring summary and the last plays - the same 45 s behind the feed as the score |
+
+The **ad screen** itself carries the stats screen on its right: the win-odds chart, the two
+teams' main numbers side by side and the scoring summary, all held back by the spoiler delay
+(nothing on it can be ahead of what you have seen). In a small Chrome window there is no room
+for it and only the timer, score and thumbnail show.
 
 How it behaves:
 

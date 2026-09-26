@@ -94,3 +94,56 @@ class NeverBackwards(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def summary(now: float) -> dict:
+    """A trimmed /summary answer (shape observed 2026-09-26): two drives, win probability per play, a box score."""
+    def play(play_id, period, clock, text, away, home, seconds_ago, scoring=False):
+        wall = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - seconds_ago))
+        return {"id": play_id, "period": {"number": period}, "clock": {"displayValue": clock}, "text": text,
+                "awayScore": away, "homeScore": home, "wallclock": wall, "scoringPlay": scoring}
+
+    team = lambda abbr, side, color: {"homeAway": side, "score": "0", "team": {"abbreviation": abbr, "location": abbr, "name": "X", "color": color}}
+    return {
+        "header": {"id": "401", "competitions": [{"competitors": [team("ISU", "home", "ae192d"), team("UTAH", "away", "be0000")],
+                                                  "status": {"type": {"shortDetail": "10:17 - 2nd"}}}]},
+        "drives": {"previous": [{"team": {"abbreviation": "UTAH"}, "plays": [
+                        play("p1", 1, "14:55", "Kickoff", 0, 0, 600),
+                        play("p2", 1, "12:10", "W. Parker run for 54 yds, for a TD", 7, 0, 400, scoring=True)]}],
+                   "current": {"team": {"abbreviation": "ISU"}, "plays": [play("p3", 2, "10:17", "J. Raynor pass complete", 7, 0, 20)]}},
+        "winprobability": [{"playId": "p1", "homeWinPercentage": 0.45}, {"playId": "p2", "homeWinPercentage": 0.2},
+                           {"playId": "p3", "homeWinPercentage": 0.18}, {"playId": "unknown", "homeWinPercentage": 0.5}],
+        "boxscore": {"teams": [{"homeAway": "away", "statistics": [{"name": "totalYards", "label": "Total Yards", "displayValue": "272"}]},
+                               {"homeAway": "home", "statistics": [{"name": "totalYards", "label": "Total Yards", "displayValue": "101"}]}],
+                     "players": [{"team": {"abbreviation": "UTAH"}, "statistics": [
+                         {"name": "passing", "text": "Utah Passing", "labels": ["C/ATT", "YDS"],
+                          "athletes": [{"athlete": {"displayName": "Devon Dampier"}, "stats": ["12/15", "160"]}]}]}]},
+        "leaders": [{"team": {"abbreviation": "UTAH"}, "leaders": [{"name": "passingYards", "displayName": "Passing Yards",
+                     "leaders": [{"displayValue": "12/15, 160 YDS", "athlete": {"displayName": "Devon Dampier"}}]}]}],
+    }
+
+
+class Stats(unittest.TestCase):
+    def test_parsing(self):
+        now = time.time()
+        stats = espn._stats(summary(now), fetched_at=now)
+        self.assertEqual((stats.away.abbreviation, stats.home.abbreviation, stats.status_detail), ("UTAH", "ISU", "10:17 - 2nd"))
+        self.assertEqual(stats.colors, {"ISU": "#ae192d", "UTAH": "#be0000"})
+        self.assertEqual([p.text for p in stats.plays], ["Kickoff", "W. Parker run for 54 yds, for a TD", "J. Raynor pass complete"])
+        self.assertEqual([w.home_pct for w in stats.win_prob], [0.45, 0.2, 0.18], "a point for an unknown play is dropped")
+        self.assertEqual(stats.team_stats, [("Total Yards", "272", "101")])
+        self.assertEqual(stats.leaders["UTAH"], [("Passing Yards", "Devon Dampier", "12/15, 160 YDS")])
+        self.assertEqual(stats.players["UTAH"][0].rows, [("Devon Dampier", ["12/15", "160"])])
+        self.assertEqual(stats.score_line(), "UTAH 7   @   ISU 0")
+        self.assertAlmostEqual(stats.win_pct("UTAH"), 0.82)
+
+    def test_the_spoiler_guard_cuts_plays_and_odds_at_their_wall_clock(self):
+        now = time.time()
+        stats = espn._stats(summary(now), fetched_at=now)
+        delayed = stats.delayed(now - 45.0)
+        self.assertEqual([p.text for p in delayed.plays], ["Kickoff", "W. Parker run for 54 yds, for a TD"], "the 20 s old play is held back")
+        self.assertEqual([w.home_pct for w in delayed.win_prob], [0.45, 0.2])
+        self.assertEqual([p.text for p in delayed.scoring_plays], ["W. Parker run for 54 yds, for a TD"])
+        older = stats.delayed(now - 500.0)
+        self.assertEqual(older.score_line(), "UTAH 0   @   ISU 0", "before the touchdown was 45 s old")
+        self.assertEqual(stats.team_stats, older.team_stats, "totals are held back as a whole snapshot instead")

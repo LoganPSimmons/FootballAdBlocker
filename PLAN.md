@@ -513,9 +513,20 @@ Learned while building it:
 - The very first synthetic "ad" window happened to contain a **Big 12 promo made of football
   highlights with no scorebug** — the predicted hard case is common, not hypothetical.
 
-**Phase 2 — Stats dashboard.** ESPN client (scoreboard + summary poller, gzip, polite
-intervals, spoiler delay via `wallclock`), game picker, the panels above as a local
-HTML/JS page inside the overlay. *Exit:* ad-mode screen shows live, correctly delayed data.
+**Phase 2 — Stats dashboard** — 🟡 **built 2026-09-26 at Logan's request, as plain Qt
+widgets rather than a web view.** `data/espn.py` polls the summary endpoint (`StatsPoller`,
+every 30 s) and serves it delayed: snapshots at least 45 s old, and plays, scoring plays and
+win-probability points additionally cut at each play's `wallclock`; the score line on the
+stats screen is the score *as of the last play served*, so it never runs ahead. `stats_widgets.py`
+draws the win-odds chart (bars after every play: above the 50 % line in the home colour when
+it is the favourite, below in the away colour; or one team's odds 0-100 %), the two-team
+comparison, one team's numbers + leaders + players by stat group, the scoring summary and the
+last plays. The **Game stats** window (control window / tray) has a team picker: both teams or
+either one; the ad screen carries the chart, the main comparison rows and the scoring summary
+on its right. `tools/preview_stats.py` and `preview_overlay.py --game` render both from the live
+game for checking. *Exit:* ad-mode screen shows live, correctly delayed data - met on the Utah
+game (17 min of play behind the feed reproduced play for play). Still ahead: the delay itself
+is a fixed 45 s (estimate it from the scorebug clock later), no "around the country" ticker.
 
 **Phase 3 — Scorebug detector + evaluator** — 🟡 **built 2026-09-19, pulled forward at
 Logan's request; second network measured 2026-09-26.** Static-edge mask learner, matcher, state
@@ -572,9 +583,10 @@ FootballAdBlocker/
     win32.py            ctypes helpers: find the stream window, rects, z-order, capture exclusion
     detect/             scorebug.py (graphics learner + matcher) · fusion.py (state machine + corrections)
                         · detector.py (pipeline, video area, graphics library) · later: scene.py · audio.py
-    actuators/          audio_mute.py · overlay.py
-    data/espn.py        scoreboard lookup, per-game poller, spoiler delay
-  dashboard/            (Phase 2) index.html · app.js · styles.css
+    actuators/          audio_mute.py · overlay.py (the ad screen: timer, score, thumbnail + the stats panels)
+    stats_widgets.py    win-odds chart, team comparison, one team's panel, scoring / plays text (Phase 2)
+    data/espn.py        scoreboard lookup, score + stats pollers, spoiler delay (snapshots + per-play wallclock)
+  dashboard/            (empty: Phase 2 was built as Qt widgets, see stats_widgets.py)
   tools/                evaluate.py · session_info.py · smoke_app.py · preview_overlay.py · unmute_chrome.py
                         · spike_*.py (Phase 0) · later: label_review.py
   sessions/             recorded games (git-ignored)      spike_out/   spike evidence (git-ignored)

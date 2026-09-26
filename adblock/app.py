@@ -30,7 +30,7 @@ from adblock import __version__, config as config_module, win32
 from adblock.actuators import audio_mute
 from adblock.actuators.overlay import Overlay
 from adblock.capture import WgcWindowSource
-from adblock.data.espn import ScorePoller
+from adblock.data.espn import GameStats, ScorePoller, StatsPoller
 from adblock.detect import memory, scene as scene_module
 from adblock.detect.detector import AD, GAME, Detector, FusionSettings, Observation
 from adblock.hotkeys import HotkeyError, HotkeyListener
@@ -160,6 +160,7 @@ class Controller(QtCore.QObject):
         self.writer = SessionWriter(config.sessions_path, config.label or config.game or "session",
                                     config.fps, config.frame_width, config.jpeg_quality) if config.record else None
         self.scores: ScorePoller | None = None
+        self.stats: StatsPoller | None = None
         self.game_label = ""
 
         if self.writer:
@@ -257,12 +258,31 @@ class Controller(QtCore.QObject):
         """Whose score the overlay shows: a team to look up, or an ESPN event picked from the list."""
         if self.scores:
             self.scores.stop()
+        if self.stats:
+            self.stats.stop()
         self.scores = ScorePoller(query, self.config.stream_delay_s, event_id=event_id) if (query or event_id) else None
+        self.stats = StatsPoller(self.scores, self.config.stream_delay_s) if self.scores else None
         self.game_label = label or query
         self.last_shown = None
         if self.scores:
             self.scores.start()
+        if self.stats:
+            self.stats.start()
         self.log("game", query=query, event_id=event_id, label=self.game_label)
+
+    def stats_current(self) -> GameStats | None:
+        """The game's stats as of ``stream_delay_s`` ago (the spoiler guard), or None."""
+        return self.stats.current() if self.stats else None
+
+    def stats_status(self) -> str:
+        """Why there are no stats to show yet."""
+        if self.stats is None:
+            return "No game selected: pick one in the main window (or start with --game <team>)."
+        if self.stats.status:
+            return self.stats.status
+        if self.scores and self.scores.status:
+            return self.scores.status
+        return f"Stats appear once they are {self.config.stream_delay_s:.0f} s old (spoiler guard) - a moment after the game is picked."
 
     def remember(self) -> None:
         """Save the graphics that proved themselves, so the next launch starts warm."""
@@ -355,6 +375,7 @@ class Controller(QtCore.QObject):
             self.log("overlay", score=shown[0], detail=shown[1])
         if self.source and (frame := self.source.latest()) is not None:
             self.overlay.set_thumbnail(frame.image)
+        self.overlay.set_stats(self.stats_current())
         self.overlay.cover(win32.window_rect(self.stream.hwnd))
 
     # --- what the UI shows ----------------------------------------------------------------------
@@ -429,6 +450,8 @@ class Controller(QtCore.QObject):
         self.listener.stop()
         if self.scores:
             self.scores.stop()
+        if self.stats:
+            self.stats.stop()
         if self.scene:
             self.scene.stop()
         if self.source:

@@ -8,8 +8,10 @@ Window recipe validated by spike S2 (tools/spike_occlusion.py), all four parts m
   WindowStaysOnTopHint      -> above fullscreen Chrome
   WDA_EXCLUDEFROMCAPTURE    -> invisible to every capture API, so the detector never sees it
 
-Phase 1 content is a placeholder (break timer, delayed score, live thumbnail); Phase 2
-replaces the body with the dashboard in a QWebEngineView.
+Content: break timer, the delayed score and live thumbnail on the left; on the right the
+stats screen - win odds after every play, the two teams' main numbers side by side, and the
+scoring summary - all held back by the spoiler delay (Phase 2, plain Qt widgets rather than
+the planned web view: nothing here needs a browser engine).
 """
 
 from __future__ import annotations
@@ -18,10 +20,13 @@ import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from adblock import win32
+from adblock.data.espn import GameStats
+from adblock.stats_widgets import COMPARISON_KEYS, TeamComparison, WinOddsChart, scoring_summary
 
 Qt = QtCore.Qt
 WINDOW_TITLE = "Football Ad Blocker overlay"
 PIP_WIDTH = 400
+STATS_WIDTH = 700
 
 STYLE = """
 #overlay { background: #0b0f14; }
@@ -35,6 +40,11 @@ QLabel { color: #e8edf2; font-family: 'Segoe UI'; }
             font: 600 26px 'Segoe UI'; padding: 16px 28px; }
 #showGame:hover { background: #26405a; border-color: #5b8fc2; }
 #pip { border: 2px solid #2a3440; background: #000; }
+#panelTitle { color: #5d6b7a; font-size: 18px; font-weight: 600; letter-spacing: 4px; }
+#scoring { color: #d9e1ea; font-size: 20px; }
+QTableWidget { color: #e8edf2; background: #121a22; alternate-background-color: #172029; border: 1px solid #2a3440;
+               border-radius: 8px; font: 22px 'Segoe UI'; gridline-color: #2a3440; }
+QHeaderView::section { color: #9fb0c3; background: #1b2530; border: none; padding: 6px; font: 600 20px 'Segoe UI'; }
 """
 
 
@@ -92,13 +102,57 @@ class Overlay(QtWidgets.QWidget):
         footer.addLayout(pip_column)
         self.set_pip_enabled(show_pip)
 
-        root = QtWidgets.QVBoxLayout(self)
+        left = QtWidgets.QVBoxLayout()
+        left.addLayout(centre, 1)
+        left.addLayout(footer)
+
+        def title(text: str) -> QtWidgets.QLabel:
+            widget = QtWidgets.QLabel(text)
+            widget.setObjectName("panelTitle")
+            return widget
+
+        self.odds = WinOddsChart(compact=True)
+        self.odds.setFixedHeight(260)
+        self.comparison = TeamComparison(COMPARISON_KEYS, row_height=44, header_height=44)
+        self.scoring = label("scoring")
+        self.scoring.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.scoring.setWordWrap(True)
+        self.stats_panel = QtWidgets.QWidget()
+        self.stats_panel.setFixedWidth(STATS_WIDTH)
+        stats = QtWidgets.QVBoxLayout(self.stats_panel)
+        stats.setContentsMargins(0, 0, 0, 0)
+        stats.setSpacing(10)
+        stats.addWidget(title("WIN ODDS"))
+        stats.addWidget(self.odds)
+        stats.addWidget(title("TEAM STATS"))
+        stats.addWidget(self.comparison)
+        stats.addWidget(title("SCORING"))
+        stats.addWidget(self.scoring, 1)
+        self.stats_key: tuple | None = None
+        self.stats_panel.hide()  # until there are stats to show
+
+        root = QtWidgets.QHBoxLayout(self)
         root.setContentsMargins(40, 40, 40, 40)
-        root.addLayout(centre, 1)
-        root.addLayout(footer)
+        root.setSpacing(40)
+        root.addLayout(left, 1)
+        root.addWidget(self.stats_panel)
 
         self.hwnd = int(self.winId())  # creates the native window while it is still hidden
         self.capture_excluded = win32.set_exclude_from_capture(self.hwnd)
+
+    def set_stats(self, stats: GameStats | None) -> None:
+        """The stats screen's numbers (already delayed). Cheap to call every tick: it only redraws on new data."""
+        if stats is None:
+            return
+        key = (stats.event_id, stats.fetched_at, len(stats.plays))
+        if key == self.stats_key:
+            return
+        self.stats_key = key
+        self.odds.set_stats(stats)
+        self.comparison.set_stats(stats)
+        self.scoring.setText(scoring_summary(stats, limit=5))
+        if not self.stats_panel.isVisible() and self.width() >= 1400:  # a small window has no room for it
+            self.stats_panel.show()
 
     def cover(self, rect: win32.Rect) -> None:
         """Show over ``rect`` (physical pixels) without activating. Safe to call repeatedly."""
