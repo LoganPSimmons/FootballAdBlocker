@@ -351,7 +351,18 @@ and the detector doesn't see anything."* Two changes, both his call:
   graphic on screen its opinion still hides nothing; the graphics rule's 5 s stays the normal
   path. Replayed on that first Fubo session (labels = his own manual toggles): **29 % → 89 % of
   the ad time covered** (338 s → 54 s leaked), broadcast hidden 1.2 s → 6.8 s (one return 5.7 s
-  slower than his click). The seven-session risk figure is in the next paragraph.
+  slower than his click). The risk, replayed with the model on all eight labelled sessions
+  (3.5 h, 56 min of ads): 137.6 s reported hidden, of which 127 s are two stretches the
+  contact sheets show to be *ads recorded under a GAME state* - 91 s of local ads under his
+  halftime "GAME" hold in session 3, 36 s of ads at the start of session 4, which began
+  mid-break with nothing learned and no click - so about 11 s of broadcast hidden in 3.5 h;
+  ad time covered 84 % overall (the ABC session 92 %, its opening break now hidden at 0:17,
+  the second he clicked live); 59 transitions, up from 41. The first version of this rule
+  re-hid the ABC bumper one frame after the quick return (the splice window closed with the
+  AD it belonged to; the model's 10 s had long been met) - caught in the replay, fixed, unit-tested.
+  Weak labels cut both ways: a session that starts inside a break, or ads that follow a "GAME"
+  click, are labelled GAME until someone clicks, and the evaluator then charges the detector
+  for hiding them. Contact sheets, not totals, decide.
 - **A splice to black can end a break the viewer hid by hand.** His pattern is to click "AD" at
   the first ad; the return then came only from graphics or another click. The quick return now
   applies after a viewer's "AD" too; the slow 20 s return stays closed, as before.
