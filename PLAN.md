@@ -381,8 +381,12 @@ Two more things the Utah game showed once the new build was up (13:08 onwards, h
   with that scorebug and *no corner bug* - and, unlike ABC, without a cut to black. So neither
   the graphics nor the quick return fire and the slow 20 s rule is the only way back; Logan
   clicked 15 s in, 7 s before it would have. A 13 s timeout sequence without any learned
-  graphic was carried by the veto. The slow return's length is the lever here (a 12 s setting
-  is being priced on the eight sessions).
+  graphic was carried by the veto. The slow return's length is the lever here: **20 s → 12 s**.
+  On the eight recorded sessions the setting makes no difference at all (every model-driven
+  return there came through a black splice or the graphics), and before the quick return
+  existed a 10 s setting cost 11 s more leaked ads and 4 more transitions for 13 s less
+  broadcast hidden - the cheap side. A 10 s stadium-set ad still cannot reopen a break; a 15 s
+  one shows its last three seconds. Deployed at halftime of the Utah game.
 - **Splice frames.** The stream drops single flat frames (score exactly 0.00 on every region,
   not dark enough to count as black) at ad-insertion boundaries; one such frame resets the
   three-frame return count and cost a second on a return. Candidate: let the return run

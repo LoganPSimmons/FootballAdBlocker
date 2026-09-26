@@ -26,7 +26,10 @@ is calling football-looking ads the broadcast:
   veto          graphics missing but the picture still looks like the broadcast (studio show,
                 bumper, the minutes before anything is learned): don't hide
   slow return   in AD, ``scene_exit_s`` of uninterrupted "looks like the broadcast" brings the
-                picture back (a halftime show with no network logo); a 15 s stadium-set ad can't
+                picture back (a halftime show with no network logo; FOX's Big Noon crew returning
+                on a fan-cam with no corner bug and no cut to black, live 2026-09-26). 12 s: a
+                10 s stadium-set ad can't reopen a break, a 15 s one shows its last three seconds -
+                the viewer clicks "GAME" 10-16 s into such returns himself, so 20 s read as failure
   quick return  in AD, right after a cut to black (``boundary_window_s``): the *quick* verdict
                 (last three seconds) saying "broadcast" for ``boundary_exit_s`` brings the
                 picture back. Breaks end through a splice to black, and on ABC/ESPN the
@@ -65,7 +68,7 @@ class FusionSettings:
     enter_ad_s: float = 5.0
     exit_ad_frames: int = 3
     weak_exit_s: float = 4.0  # how long a not-yet-established graphic must stay to bring the game back
-    scene_exit_s: float = 20.0  # how long the image model must keep saying "broadcast" to end an AD by itself
+    scene_exit_s: float = 12.0  # how long the image model must keep saying "broadcast" to end an AD by itself
     scene_enter_s: float = 10.0  # ...and "commercial", with no graphic on screen, to start one (inf: never)
     boundary_window_s: float = 15.0  # a cut to black this recent = a splice: the quick verdict may end the AD...
     boundary_exit_s: float = 2.0  # ...once it has said "broadcast" for this long since the black frame

@@ -184,7 +184,7 @@ def main() -> int:
     parser.add_argument("--scene", action="store_true",
                         help="fuse in the image model (needs requirements-ml.txt and cached embeddings)")
     parser.add_argument("--scene-exit", type=float, default=FusionSettings.scene_exit_s,
-                        help="seconds of uninterrupted 'looks like the broadcast' that end an AD (default 20)")
+                        help="seconds of uninterrupted 'looks like the broadcast' that end an AD (default 12)")
     parser.add_argument("--boundary-exit", type=float, default=FusionSettings.boundary_exit_s,
                         help="after a cut to black, seconds of the quick verdict 'broadcast' that end an AD (default 2; 0 disables)")
     parser.add_argument("--scene-enter", type=float, default=FusionSettings.scene_enter_s,

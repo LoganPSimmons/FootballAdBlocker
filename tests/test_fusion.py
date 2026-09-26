@@ -127,13 +127,13 @@ class ImageModel(unittest.TestCase):
         self.assertEqual(line.states[-1], AD)
         self.assertEqual(line.feed(None, 3.5), GAME, "the window went away: nothing to cover")
 
-    def test_return_needs_twenty_seconds_so_a_stadium_ad_cannot_reopen_a_break(self):
+    def test_return_needs_twelve_seconds_so_a_short_stadium_ad_cannot_reopen_a_break(self):
         line = Timeline()
         line.feed(True, 30)
         self.feed(line, False, False, 30)
-        self.assertEqual(self.feed(line, False, True, 15), AD, "a 15 s football-looking ad")
+        self.assertEqual(self.feed(line, False, True, 10), AD, "a 10 s football-looking ad")
         self.feed(line, False, False, 30)
-        self.assertEqual(self.feed(line, False, True, 21), GAME, "the studio show is back, and stays")
+        self.assertEqual(self.feed(line, False, True, 13), GAME, "the studio show is back, and stays")
 
     def test_a_cut_to_black_then_the_broadcast_brings_the_game_back_quickly(self):
         """Live 2026-09-26 (ABC): breaks end with a splice to black, then a 20 s sponsor bumper

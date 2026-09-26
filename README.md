@@ -65,7 +65,7 @@ How it behaves:
 - **Image model (optional, `requirements-ml.txt`, ~5 GB, uses the GPU a little):** a
   whole-picture check once a second - does this look like the broadcast or like a commercial?
   It may *stop* the ad screen from coming up when graphics are missing (studio show, bumper,
-  the first minutes) and bring the picture back: after 20 s of "looks like the broadcast", or,
+  the first minutes) and bring the picture back: after 12 s of "looks like the broadcast", or,
   right after a cut to black (the splice that ends a break), after 2 s of it. When **no learned
   graphic is on screen** - missing, or nothing learned yet in the first minutes - it may also
   hide: 10 s of "looks like a commercial" brings the ad screen up, so a break right after a
