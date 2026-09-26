@@ -5,11 +5,13 @@ an ad break it mutes Chrome and covers the stream with a stats screen; when the 
 it gets out of the way. It never touches the stream itself — it only looks at what is on
 screen. The approach, the measured feasibility results and the roadmap are in [PLAN.md](PLAN.md).
 
-**Where it is now:** it hides ads **by itself**. It learns each broadcast's fixed graphics (the
-scorebug, the network's corner logo) during the first minute or two, treats their disappearance
-as an ad break, and brings the game back the moment they return. When it is wrong you tell it
-with one click — and every correction is recorded next to low-res frames of the stream, which
-is the labelled data the later, smarter detector is trained and measured on.
+**Where it is now:** it hides ads **by itself**. An image model looks at the whole picture once
+a second and decides "broadcast" or "commercial"; a few seconds of "commercial" hides, a few
+seconds of "broadcast" shows. The broadcast's fixed graphics (the scorebug, the network's corner
+logo), learned during the first minute or two and remembered between sessions, guard it: while
+one is on screen nothing is hidden, and when one comes back the picture is back at once. When it
+is wrong you tell it with one click — and every correction is recorded next to low-res frames of
+the stream, which is the labelled data the later, smarter detector is trained and measured on.
 
 ## Use
 
@@ -45,9 +47,11 @@ How it behaves:
   means anything; with remembered graphics that shrinks to about a minute. Until then a break is
   hidden only when the image model has called the picture a commercial for 10 s. The window's
   live view shows what it has learned (green = on screen, red = missing).
-- Ads are covered and Chrome muted **about 5 s after a break starts** — deliberately slow, so a
-  replay or full-screen graphic is never mistaken for an ad. The game is back **within a
-  second** of the broadcast returning, usually on the return bumper, before the scorebug.
+- Ads are covered and Chrome muted **about 5-7 s after a break starts** (the model's verdict is
+  a three-second median, then 4 s of it) — deliberately slow, so a replay or full-screen graphic
+  is never mistaken for an ad. The game is back **within a second** of a learned graphic
+  returning, or about 4-5 s after the picture starts looking like the broadcast again (the return
+  bumper), or 2 s after a cut to black followed by the broadcast.
 - A correction takes effect immediately and is **held until the picture agrees with it**, then
   automatic detection carries on. Clicking a few seconds early or late needs no second click.
   ("Agrees" = no graphics for a second after "AD"; graphics that *stay* for 20 s after "GAME".)
@@ -62,18 +66,16 @@ How it behaves:
   *leaves* during post-score packages and on some live shots, and every break ends with a cut to
   black and a ~20 s sponsor bumper that carries no graphic at all - there the image model does
   the work: it keeps the picture up through the packages and brings it back on the bumper.
-- **Image model (optional, `requirements-ml.txt`, ~5 GB, uses the GPU a little):** a
-  whole-picture check once a second - does this look like the broadcast or like a commercial?
-  It may *stop* the ad screen from coming up when graphics are missing (studio show, bumper,
-  the first minutes) and bring the picture back: after 12 s of "looks like the broadcast", or,
-  right after a cut to black (the splice that ends a break), after 2 s of it. When **no learned
-  graphic is on screen** - missing, or nothing learned yet in the first minutes - it may also
-  hide: 10 s of "looks like a commercial" brings the ad screen up, so a break right after a
-  launch no longer leaks. With a graphic on screen its opinion never hides anything. Once you
-  have said "AD", only the real graphics, a cut to black followed by the broadcast, or you end
-  that break. Its weakness is ads that look like football - those leak, and one right after a
-  cut to black can show for a few seconds before it is hidden again. Switch: "Use the image
-  model" / `--no-scene`.
+- **Image model (`requirements-ml.txt`, ~5 GB, uses the GPU a little) - it drives.** A
+  whole-picture check once a second: does this look like the broadcast or like a commercial?
+  Its three-second verdict saying "commercial" for 4 s hides; "broadcast" for 3 s shows; right
+  after a cut to black, 2 s. A learned graphic on screen blocks hiding, and one coming back
+  shows the picture at once - the graphics never do anything else. Once you have said "AD",
+  only the real graphics, a cut to black followed by the broadcast, or 12 s of broadcast end
+  that break. Its weakness is ads that look like football - those show until it changes its
+  mind. Without the model (not installed, or "Use the image model" unticked / `--no-scene`)
+  the graphics rules drive as they did on the first live day; `--fused` keeps the graphics
+  driving with the model only vetoing and returning.
 - If it can't see the stream (other tab, minimized, a window size it hasn't learned yet) it
   shows the game rather than guess. Leaving or entering fullscreen makes it learn again for that
   window size, which takes another minute or two of game picture.

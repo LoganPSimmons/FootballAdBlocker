@@ -374,7 +374,20 @@ mid-break (Logan clicked 4 s later). Fullscreen now tolerates 2 px, all fullscre
 one graphics library (they analyse to the same 640×360), and evidence going unknown no longer
 ends a break while the image model keeps calling it a commercial.
 
-Two more things the Utah game showed once the new build was up (13:08 onwards, hands-off):
+**The model drives (14:07).** After watching the status line beside the picture for an hour,
+Logan: *"let's just use the image model - from my observations it performs better with just
+that."* His observations match the day's log: every mistake that cost him a click after the
+first fixes was a graphics rule being slow or blind (the 20 s and 12 s returns on bumpers, the
+young-graphic 4 s rule after each launch, the timeout scorebug layout it does not know, the
+1079-pixel geometry), while the model's verdict was right within its few seconds of lag. So
+`scene_drives` is now the default: the model's three-second verdict drives - "commercial" for
+4 s hides, "broadcast" for 3 s shows, 2 s after a cut to black - and the learned graphics keep
+only the two powers that can never hide play: on screen they block hiding, and coming back they
+show the picture at once. A viewer's "AD" needs graphics, a splice or 12 s of broadcast to end.
+Whenever the model has no opinion the graphics rules take over, and `--fused` restores the
+2026-09-19 behaviour. The price on the recordings is in the next paragraph.
+
+Two more things the Utah game showed once the 13:08 build was up (hands-off):
 
 - **FOX's Big Noon crew is not last week's FOX.** Timeouts get a stacked "GEICO" scorebug that
   the learned region does not match, and the return from a break comes on a fan-cam sequence
