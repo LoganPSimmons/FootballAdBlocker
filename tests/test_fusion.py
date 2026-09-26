@@ -110,7 +110,8 @@ class ImageModelDrives(unittest.TestCase):
         line = Timeline(scene_drives=True)
         self.assertEqual(self.feed(line, True, False, 60), GAME, "the scorebug is up: the model cannot hide")
         self.assertEqual(self.feed(line, False, False, 5), AD)
-        self.assertEqual(self.feed(line, True, False, 1.0), GAME, "graphics back: shown although the model still says ad")
+        self.assertEqual(self.feed(line, True, False, 2.0), AD, "a graphic against an active 'commercial' verdict does not show")
+        self.assertEqual(self.feed(line, True, None, 1.0), GAME, "the model undecided: the graphic shows the picture at once")
 
     def test_after_a_viewers_ad_the_model_needs_the_long_rule(self):
         line = Timeline(scene_drives=True, drive_exit_s=3.0, scene_exit_s=12.0)

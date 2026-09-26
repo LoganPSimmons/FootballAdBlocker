@@ -184,7 +184,9 @@ class Fusion:
         model_says_ad = not game_like and scene_ad_for >= max(s.scene_enter_s, delay)  # nothing vouches for the game
         if drives:
             hide = not game_like and quick_ad_for >= s.drive_enter_s
-            show = present or quick_for >= s.boundary_exit_s \
+            # graphics show the picture at once unless the model is actively calling it a commercial: a
+            # remembered logo from another network matched an ad at its threshold for four frames (live 14:41)
+            show = (present and quick is not False) or quick_for >= s.boundary_exit_s \
                 or quick_ok_for >= (s.drive_exit_s if self._scene_may_return else s.scene_exit_s)
         else:
             hide = not vetoed and (graphics_say_ad or model_says_ad)
