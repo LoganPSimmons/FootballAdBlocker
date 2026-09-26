@@ -129,6 +129,8 @@ class Overlay(QtWidgets.QWidget):
         stats.addWidget(title("SCORING"))
         stats.addWidget(self.scoring, 1)
         self.stats_key: tuple | None = None
+        self.stats_available = False
+        self.target_width = 0  # the width cover() was last asked for; the widget may refuse to shrink below its minimum
         self.stats_panel.hide()  # until there are stats to show
 
         root = QtWidgets.QHBoxLayout(self)
@@ -142,6 +144,8 @@ class Overlay(QtWidgets.QWidget):
 
     def set_stats(self, stats: GameStats | None) -> None:
         """The stats screen's numbers (already delayed). Cheap to call every tick: it only redraws on new data."""
+        self.stats_available = stats is not None
+        self.fit_stats_panel()
         if stats is None:
             return
         key = (stats.event_id, stats.fetched_at, len(stats.plays))
@@ -151,8 +155,14 @@ class Overlay(QtWidgets.QWidget):
         self.odds.set_stats(stats)
         self.comparison.set_stats(stats)
         self.scoring.setText(scoring_summary(stats, limit=5))
-        if not self.stats_panel.isVisible() and self.width() >= 1400:  # a small window has no room for it
-            self.stats_panel.show()
+
+    def fit_stats_panel(self) -> None:
+        """Show the stats panel when there are stats and the overlay is wide enough for it - checked on
+        every tick and every resize, because the first stats arrive before the overlay has a size
+        (live 2026-09-26: the panel never appeared)."""
+        wanted = self.stats_available and self.target_width >= STATS_WIDTH + 700
+        if wanted != self.stats_panel.isVisible():
+            self.stats_panel.setVisible(wanted)
 
     def cover(self, rect: win32.Rect) -> None:
         """Show over ``rect`` (physical pixels) without activating. Safe to call repeatedly."""
@@ -160,6 +170,9 @@ class Overlay(QtWidgets.QWidget):
         screen = QtGui.QGuiApplication.screenAt(QtCore.QPoint(left + 1, top + 1)) or QtGui.QGuiApplication.primaryScreen()
         ratio = screen.devicePixelRatio()  # 1.0 on both of Logan's screens; mixed-DPI setups are untested
         geometry = QtCore.QRect(*(round(v / ratio) for v in (left, top, right - left, bottom - top)))
+        if geometry.width() != self.target_width:
+            self.target_width = geometry.width()
+            self.fit_stats_panel()  # before the resize: the panel's minimum width would keep a small window from shrinking
         if geometry != self.geometry():
             self.setGeometry(geometry)
         if not self.isVisible():

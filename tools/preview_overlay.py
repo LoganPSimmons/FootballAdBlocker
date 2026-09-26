@@ -35,6 +35,7 @@ def main() -> int:
     overlay = Overlay("F9")
     width, height = (int(v) for v in args.size.split("x"))
     overlay.resize(width, height)
+    overlay.target_width = width
     overlay.set_break_seconds(83)
     overlay.set_score("USU 0   @   #17 UTAH 7", "10:37 - 1st   ·   FOX")
     if args.frame:
@@ -53,7 +54,6 @@ def main() -> int:
         client.close()
         overlay.set_score(stats.score_line(), f"{stats.status_detail}   ·   {game.network}")
         overlay.set_stats(stats)
-        overlay.stats_panel.show()
     args.out.parent.mkdir(exist_ok=True)
     overlay.grab().save(str(args.out))
     print(f"wrote {args.out}")
