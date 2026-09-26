@@ -410,6 +410,14 @@ Two more things the Utah game showed once the 13:08 build was up (hands-off):
   tolerate one missing frame. A 5 s "false start" break (FOX went to ads and came straight
   back for a field-goal attempt) was hidden for 2 s, the entry delay meeting the return.
 
+**Tried and rejected (15:20):** a damper for the flapping that football-looking ads cause under the
+model (AD 15:16:12, GAME :25, AD :34, GAME :52 on a couch-full-of-fans ad) - after a model return
+is undone within 30 s, returns for the next three minutes need the 12 s rule. On the eight
+sessions it cut transitions 72 → 65 and leaked ads 566 → 515 s, but hid 35 s more real
+broadcast (session 6: 0 → 19 s) - the expensive side paying for the cheap one, so it was
+reverted. The flapping stays as the price of the model driving; a better fix is a probe
+trained on these recordings (Phase 5), which would stop calling those ads broadcast at all.
+
 **Indicator study** (`tools/explore_features.py`; every frame of the seven labelled sessions,
 31,805 frames, 49 min of ads). Each candidate was scored overall and *where a learned graphic was
 missing* - the only place an extra indicator would be consulted. What it found:
