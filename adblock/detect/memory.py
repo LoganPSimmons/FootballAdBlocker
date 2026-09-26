@@ -25,7 +25,7 @@ from pathlib import Path
 
 import numpy as np
 
-from adblock.detect.scorebug import Region
+from adblock.detect.scorebug import Region, around_indices
 
 MAX_REMEMBERED = 32
 EXPIRE_DAYS = 120
@@ -47,8 +47,12 @@ def load(path: Path) -> list[Remembered]:
     try:
         with np.load(path, allow_pickle=False) as data:
             meta = json.loads(str(data["meta"]))
-            return [Remembered(tuple(m["shape"]), Region(tuple(m["bbox"]), data[f"on_{i}"], data[f"off_{i}"]),
-                               float(m["seen_s"]), m["last_seen"], m.get("label", "")) for i, m in enumerate(meta)]
+            items = []
+            for i, m in enumerate(meta):
+                shape, bbox, on = tuple(m["shape"]), tuple(m["bbox"]), data[f"on_{i}"]
+                region = Region(bbox, on, data[f"off_{i}"], around_indices(shape, bbox, on))
+                items.append(Remembered(shape, region, float(m["seen_s"]), m["last_seen"], m.get("label", "")))
+            return items
     except (OSError, ValueError, KeyError):  # a damaged memory is no memory, never a crash
         return []
 

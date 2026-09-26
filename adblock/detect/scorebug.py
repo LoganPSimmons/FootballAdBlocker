@@ -16,8 +16,14 @@ runs live:
             they come and go separately: replays, full-screen graphics and the return-from-
             break bumper drop the scorebug but keep the corner bug (seen on FOX, 2026-09-19)
   score     per region: share of its edge pixels present, minus the share of its "quiet"
-            pixels (persistently edge-free ones around it) that now have edges. A graphic
-            that is on screen scores ~0.9; busy random texture ~0; a flat frame 0.
+            pixels (persistently edge-free ones around it) that now have edges - and never
+            more than its excess over the edge density of the picture *around* it. A graphic
+            that is on screen scores ~0.9; busy random texture ~0; a flat frame 0. The second
+            term is what keeps a small corner bug from "appearing" on a dense crowd shot:
+            crowd edges hit 80 % of a 400-pixel logo by chance (live 2026-09-26, ABC), but
+            they hit the pixels next to it just as often. Measured: those false matches score
+            at most 0.61 this way, a bug that is really there >= 0.87 - even on FOX's return
+            bumper, where 90 % of the pixels around the corner bug are edges too.
 
 Viewer corrections steer the learner: frames tagged GAME seed the mask (so a new scorebug
 layout is picked up right after "that's the game"); frames tagged AD are simply left out.
@@ -45,6 +51,9 @@ LOOK_DIFF = 15.0  # mean gray-level difference between 16x9 thumbnails that make
 PRESENT = 0.6  # region score that counts as "on screen" (2026-09-19 FOX: ads <= 0.43, game >= 0.83)
 SMALL_REGION_PIXELS = 800  # below this a region is easy to match by accident (a line of ad text will do)...
 PRESENT_SMALL = 0.8  # ...so it has to match almost perfectly (live: 225-px scorebug fragments hit 0.77 on an ad)
+MIN_AROUND = 50  # surrounding pixels needed before the picture's edge density around a region is trusted
+BUSY_FLOOR = 0.05  # the excess over chance is measured against at least this much headroom (a picture that is
+#                    all edges tells nothing either way; a *perfect* hit on a 90 %-edges background still scores 1.0)
 
 TAG_NONE, TAG_GAME, TAG_AD = 0, 1, -1
 
@@ -75,11 +84,16 @@ class Region:
     bbox: tuple[int, int, int, int]  # x0, y0, x1, y1 in analysis pixels
     on: np.ndarray = field(repr=False)  # flat indices: persistent edge pixels
     off: np.ndarray = field(repr=False)  # flat indices: persistently quiet pixels around them
+    around: np.ndarray | None = field(default=None, repr=False, compare=False)  # flat indices: the rest of the box
 
     def score(self, edges_flat: np.ndarray) -> float:
         hit = float(edges_flat[self.on].mean())
         noise = float(edges_flat[self.off].mean()) if len(self.off) else 0.0
-        return hit - noise
+        score = hit - noise
+        if self.around is not None and len(self.around) >= MIN_AROUND:
+            busy = float(edges_flat[self.around].mean())  # how edgy the picture is where the graphic would be
+            score = min(score, (hit - busy) / max(1.0 - busy, BUSY_FLOOR))  # excess over chance
+        return score
 
     @property
     def threshold(self) -> float:
@@ -92,6 +106,15 @@ class Region:
         x0, y0, x1, y1 = self.bbox
         return f"{'top' if (y0 + y1) / 2 < 120 else 'bottom' if (y0 + y1) / 2 > 240 else 'middle'}-" \
                f"{'left' if (x0 + x1) / 2 < 213 else 'right' if (x0 + x1) / 2 > 427 else 'centre'}"
+
+
+def around_indices(shape: tuple[int, int], bbox: tuple[int, int, int, int], on: np.ndarray) -> np.ndarray:
+    """Flat indices of the box's pixels that are not the graphic's own edge pixels."""
+    box = np.zeros(shape, bool)
+    x0, y0, x1, y1 = bbox
+    box[y0:y1, x0:x1] = True
+    box.reshape(-1)[on] = False
+    return np.flatnonzero(box)
 
 
 @dataclass
@@ -261,11 +284,18 @@ class MaskLearner:
         pixels = np.zeros(self.shape, bool)
         flat = pixels.reshape(-1)
         flat[region.on] = flat[region.off] = True
+        around = region.around if region.around is not None and len(region.around) >= MIN_AROUND else None
+        if around is not None:
+            flat[around] = True
         series = self._series(pixels)
-        is_on = np.isin(np.flatnonzero(flat), region.on)
+        index = np.flatnonzero(flat)
+        is_on, is_off = np.isin(index, region.on), np.isin(index, region.off)
         hit = series[:, is_on].mean(axis=1)
-        noise = series[:, ~is_on].mean(axis=1) if (~is_on).any() else 0.0
-        return hit - noise
+        scores = hit - (series[:, is_off].mean(axis=1) if is_off.any() else 0.0)
+        if around is not None:
+            busy = series[:, np.isin(index, around)].mean(axis=1)
+            scores = np.minimum(scores, (hit - busy) / np.maximum(1.0 - busy, BUSY_FLOOR))
+        return scores
 
     def _regions(self, persistent: np.ndarray, seed: np.ndarray) -> list[Region]:
         height, width = self.shape
@@ -284,5 +314,7 @@ class MaskLearner:
             box[y0:y1, x0:x1] = ~persistent[y0:y1, x0:x1]
             quiet = np.zeros(self.shape, bool)
             quiet[box] = self._series(box)[seed].mean(axis=0) <= QUIET
-            regions.append(Region((int(x0), int(y0), int(x1), int(y1)), np.flatnonzero(on), np.flatnonzero(quiet)))
+            bbox = (int(x0), int(y0), int(x1), int(y1))
+            flat_on = np.flatnonzero(on)
+            regions.append(Region(bbox, flat_on, np.flatnonzero(quiet), around_indices(self.shape, bbox, flat_on)))
         return regions
