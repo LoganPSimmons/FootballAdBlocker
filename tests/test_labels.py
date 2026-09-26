@@ -63,15 +63,38 @@ class BackDating(unittest.TestCase):
         ]
         self.assertEqual(effective_labels(TIMES, recorded, events), recorded)
 
-    def test_back_dating_is_capped(self):
-        times = [float(t) for t in range(0, 1000, 10)]
+    def test_a_late_game_click_is_a_late_return_not_a_wrong_break(self):
+        times = [float(t) for t in range(0, 1000, 5)]
         recorded = ["GAME" if t < 100 else "AD" if t < 900 else "GAME" for t in times]
         events = [{"t": 100.0, "event": "state", "state": "AD", "source": "detector"},
                   {"t": 900.0, "event": "correction", "to": "GAME", "via": "tray"},
                   {"t": 900.0, "event": "state", "state": "GAME", "source": "tray"}]
         labels = effective_labels(times, recorded, events)
-        self.assertEqual(labels[times.index(500.0)], "AD", "13 minutes ago is not what the click was about")
-        self.assertEqual(labels[times.index(700.0)], "GAME")
+        self.assertEqual(labels[times.index(500.0)], "AD", "the break was real; only the return was late")
+        self.assertEqual(labels[times.index(880.0)], "AD", "without evidence the return is taken to be 10 s back")
+        self.assertEqual(labels[times.index(895.0)], "GAME")
+        # With evidence: the image model saw the broadcast from t=870 on (graphics still missing).
+        evidence = [(float(t), False, t >= 870) for t in range(0, 1000)]
+        labels = effective_labels(times, recorded, events, evidence)
+        self.assertEqual(labels[times.index(865.0)], "AD")
+        self.assertEqual(labels[times.index(870.0)], "GAME")
+        # A run longer than LATE_MAX_S is capped: the viewer would not have waited that long.
+        evidence = [(float(t), False, t >= 700) for t in range(0, 1000)]
+        labels = effective_labels(times, recorded, events, evidence)
+        self.assertEqual(labels[times.index(850.0)], "AD")
+        self.assertEqual(labels[times.index(860.0)], "GAME")
+
+    def test_a_late_ad_click_after_a_detector_return_is_a_new_break(self):
+        times = [float(t) for t in range(0, 400, 2)]
+        recorded = ["AD" if t < 100 else "GAME" if t < 300 else "AD" for t in times]
+        events = [{"t": 100.0, "event": "state", "state": "GAME", "source": "detector"},
+                  {"t": 300.0, "event": "correction", "to": "AD", "via": "hotkey"},
+                  {"t": 300.0, "event": "state", "state": "AD", "source": "hotkey"}]
+        evidence = [(float(t), t < 280) for t in range(0, 400)]  # graphics gone from t=280
+        labels = effective_labels(times, recorded, events, evidence)
+        self.assertEqual(labels[times.index(200.0)], "GAME", "the detector's return 200 s earlier was right")
+        self.assertEqual(labels[times.index(278.0)], "GAME")
+        self.assertEqual(labels[times.index(282.0)], "AD")
 
 
 if __name__ == "__main__":
