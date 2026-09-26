@@ -374,6 +374,21 @@ mid-break (Logan clicked 4 s later). Fullscreen now tolerates 2 px, all fullscre
 one graphics library (they analyse to the same 640×360), and evidence going unknown no longer
 ends a break while the image model keeps calling it a commercial.
 
+Two more things the Utah game showed once the new build was up (13:08 onwards, hands-off):
+
+- **FOX's Big Noon crew is not last week's FOX.** Timeouts get a stacked "GEICO" scorebug that
+  the learned region does not match, and the return from a break comes on a fan-cam sequence
+  with that scorebug and *no corner bug* - and, unlike ABC, without a cut to black. So neither
+  the graphics nor the quick return fire and the slow 20 s rule is the only way back; Logan
+  clicked 15 s in, 7 s before it would have. A 13 s timeout sequence without any learned
+  graphic was carried by the veto. The slow return's length is the lever here (a 12 s setting
+  is being priced on the eight sessions).
+- **Splice frames.** The stream drops single flat frames (score exactly 0.00 on every region,
+  not dark enough to count as black) at ad-insertion boundaries; one such frame resets the
+  three-frame return count and cost a second on a return. Candidate: let the return run
+  tolerate one missing frame. A 5 s "false start" break (FOX went to ads and came straight
+  back for a field-goal attempt) was hidden for 2 s, the entry delay meeting the return.
+
 **Indicator study** (`tools/explore_features.py`; every frame of the seven labelled sessions,
 31,805 frames, 49 min of ads). Each candidate was scored overall and *where a learned graphic was
 missing* - the only place an extra indicator would be consulted. What it found:
