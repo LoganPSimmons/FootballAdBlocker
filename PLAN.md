@@ -385,7 +385,11 @@ young-graphic 4 s rule after each launch, the timeout scorebug layout it does no
 only the two powers that can never hide play: on screen they block hiding, and coming back they
 show the picture at once. A viewer's "AD" needs graphics, a splice or 12 s of broadcast to end.
 Whenever the model has no opinion the graphics rules take over, and `--fused` restores the
-2026-09-19 behaviour. The price on the recordings is in the next paragraph.
+2026-09-19 behaviour. The price, replayed on all eight labelled sessions (3.5 h, 56 min of ads)
+against the fused build: broadcast hidden 3.6 s instead of 10.9 s once the two label-noise
+stretches are set aside (with them: 149 s vs 138 s), ad time leaked 566 s instead of 525 s
+(83 % covered instead of 84 %), 72 transitions instead of 59 - about four more flips an hour.
+That is the cheap side paying for the expensive side, which is the trade the plan asks for.
 
 Two more things the Utah game showed once the 13:08 build was up (hands-off):
 
