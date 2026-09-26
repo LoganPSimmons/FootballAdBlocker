@@ -163,8 +163,8 @@ class Detector:
         """Fullscreen graphics worth remembering: minutes on screen in this session."""
         with self._lock:
             today = date.today().isoformat()
-            return [Remembered(key[3], tr.region, tr.seen_s, today, label)
-                    for key, library in self._library.items() if key[2] == (0, 0, key[0], key[1])
+            return [Remembered(key[1], tr.region, tr.seen_s, today, label)
+                    for key, library in self._library.items() if key[0] == FULLSCREEN
                     for tr in library if tr.seen_s >= FAST_RETURN_S]
 
     def unknown(self, t: float) -> Observation:
@@ -186,14 +186,13 @@ class Detector:
         gray = scorebug.analysis_gray(image, rect)
         black = is_black(gray)
         edges = scorebug.edge_map(gray)
-        key = (image.shape[1], image.shape[0], rect, edges.shape)
+        key = geometry_key(image.shape, rect, edges.shape)
         learner = self._learners.setdefault(key, scorebug.MaskLearner(edges.shape))
         if key not in self._library:
-            fullscreen_picture = rect == (0, 0, image.shape[1], image.shape[0])
             # A warm start: remembered graphics join the library with no on-screen time, so
             # they can vouch for the game at once but their absence means nothing yet.
             self._library[key] = [TrackedRegion(item.region, t) for item in self.remembered
-                                  if fullscreen_picture and item.shape == edges.shape]
+                                  if key[0] == FULLSCREEN and item.shape == edges.shape]
         library = self._library[key]
 
         flat = edges.reshape(-1)
@@ -265,7 +264,7 @@ class Detector:
                 return None
             gray = scorebug.analysis_gray(image, rect)
             canvas = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-            key = (image.shape[1], image.shape[0], rect, gray.shape)
+            key = geometry_key(image.shape, rect, gray.shape)
             for tracked in self._library.get(key, []):
                 colour = (150, 150, 150) if not tracked.trusted else (80, 255, 80) if tracked.present else (60, 60, 255)
                 flat = canvas.reshape(-1, 3)
@@ -273,6 +272,19 @@ class Detector:
                 x0, y0, x1, y1 = tracked.region.bbox
                 cv2.rectangle(canvas, (x0, y0), (x1, y1), colour, 1)
             return canvas
+
+
+FULLSCREEN = "fullscreen"
+
+
+def geometry_key(shape: tuple, rect: Rect, analysis_shape: tuple[int, int]) -> tuple:
+    """Which graphics library a picture belongs to. Fullscreen pictures share one whatever their
+    exact pixel size - a 1920x1079 window (Fubo, live 2026-09-26) analyses to the same 640x360 as
+    1920x1080, and starting afresh for it forgot everything mid-break. A video area inside a
+    browser window is pixel-exact."""
+    if rect == (0, 0, shape[1], shape[0]):
+        return (FULLSCREEN, analysis_shape)
+    return (shape[1], shape[0], rect, analysis_shape)
 
 
 BLACK_MEAN, BLACK_BRIGHT, BLACK_BRIGHT_SHARE = 16.0, 60, 0.005

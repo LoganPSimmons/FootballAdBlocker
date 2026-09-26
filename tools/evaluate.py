@@ -187,13 +187,16 @@ def main() -> int:
                         help="seconds of uninterrupted 'looks like the broadcast' that end an AD (default 20)")
     parser.add_argument("--boundary-exit", type=float, default=FusionSettings.boundary_exit_s,
                         help="after a cut to black, seconds of the quick verdict 'broadcast' that end an AD (default 2; 0 disables)")
+    parser.add_argument("--scene-enter", type=float, default=FusionSettings.scene_enter_s,
+                        help="seconds of 'commercial' with no graphic on screen that start an AD (default 10; 0 disables)")
     parser.add_argument("--raw-labels", action="store_true",
                         help="score against the recorded state as is, without applying corrections backwards")
     parser.add_argument("--with-corrections", action="store_true",
                         help="also replay the viewer's recorded clicks (default: the detector unaided)")
     args = parser.parse_args()
     settings = FusionSettings(enter_ad_s=args.enter_ad, exit_ad_frames=args.exit_frames, scene_exit_s=args.scene_exit,
-                              boundary_exit_s=args.boundary_exit if args.boundary_exit > 0 else float("inf"))
+                              boundary_exit_s=args.boundary_exit if args.boundary_exit > 0 else float("inf"),
+                              scene_enter_s=args.scene_enter if args.scene_enter > 0 else float("inf"))
 
     sessions = args.sessions
     if not sessions:

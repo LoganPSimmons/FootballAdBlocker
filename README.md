@@ -40,10 +40,11 @@ How it behaves:
 - **No training per game.** It finds each broadcast's graphics by itself while you watch, and it
   **remembers** the ones that proved themselves (`learned/graphics.npz`), so a network you have
   watched before is recognised in the first second - only team-specific parts are learned afresh.
-- **First minutes on a network it has never seen: nothing is hidden.** It has to learn the
-  graphics (a minute or so) and see them stay for another minute before their absence means
-  anything. With remembered graphics that shrinks to about a minute. The window's live view shows what it has learned (green = on screen,
-  red = missing).
+- **First minutes on a network it has never seen: only the image model can hide.** The graphics
+  have to be learned (a minute or so) and seen to stay for another minute before their absence
+  means anything; with remembered graphics that shrinks to about a minute. Until then a break is
+  hidden only when the image model has called the picture a commercial for 10 s. The window's
+  live view shows what it has learned (green = on screen, red = missing).
 - Ads are covered and Chrome muted **about 5 s after a break starts** — deliberately slow, so a
   replay or full-screen graphic is never mistaken for an ad. The game is back **within a
   second** of the broadcast returning, usually on the return bumper, before the scorebug.
@@ -65,10 +66,14 @@ How it behaves:
   whole-picture check once a second - does this look like the broadcast or like a commercial?
   It may *stop* the ad screen from coming up when graphics are missing (studio show, bumper,
   the first minutes) and bring the picture back: after 20 s of "looks like the broadcast", or,
-  right after a cut to black (the splice that ends a break), after 2 s of it. It can never hide
-  anything, and once you have said "AD" only the real graphics or you end that break. Its
-  weakness is ads that look like football - those leak, and one right after a cut to black can
-  show for a few seconds before it is hidden again. Switch: "Use the image model" / `--no-scene`.
+  right after a cut to black (the splice that ends a break), after 2 s of it. When **no learned
+  graphic is on screen** - missing, or nothing learned yet in the first minutes - it may also
+  hide: 10 s of "looks like a commercial" brings the ad screen up, so a break right after a
+  launch no longer leaks. With a graphic on screen its opinion never hides anything. Once you
+  have said "AD", only the real graphics, a cut to black followed by the broadcast, or you end
+  that break. Its weakness is ads that look like football - those leak, and one right after a
+  cut to black can show for a few seconds before it is hidden again. Switch: "Use the image
+  model" / `--no-scene`.
 - If it can't see the stream (other tab, minimized, a window size it hasn't learned yet) it
   shows the game rather than guess. Leaving or entering fullscreen makes it learn again for that
   window size, which takes another minute or two of game picture.

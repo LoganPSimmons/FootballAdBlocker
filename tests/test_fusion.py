@@ -104,10 +104,28 @@ class ImageModel(unittest.TestCase):
         self.assertEqual(self.feed(line, False, True, 120), GAME, "no logo, but it still looks like the broadcast")
         self.assertEqual(self.feed(line, False, False, 1), AD, "commercials: hidden at once, the 5 s were long over")
 
-    def test_it_can_never_hide_anything_by_itself(self):
+    def test_with_a_graphic_on_screen_its_opinion_cannot_hide(self):
         line = Timeline()
         self.assertEqual(self.feed(line, True, False, 300), GAME, "graphics on screen: its opinion is irrelevant")
-        self.assertEqual(self.feed(line, None, False, 300), GAME, "nothing learned yet: 'looks like an ad' hides nothing")
+
+    def test_alone_it_hides_after_a_sustained_commercial_verdict_and_lets_go_when_that_stops(self):
+        """Live 2026-09-26 (Fubo, right after a launch): nothing trusted yet, the model said
+        "commercial" through a whole break, and the viewer watched it leak - then asked for this."""
+        line = Timeline(scene_enter_s=10.0, unknown_grace_s=3.0)
+        self.assertEqual(self.feed(line, None, False, 9.5), GAME, "not before 10 s")
+        self.assertEqual(self.feed(line, None, False, 1.0), AD)
+        self.assertEqual(self.feed(line, None, False, 60), AD, "unknown graphics do not undo it while it says commercial")
+        self.assertEqual(self.feed(line, None, None, 2.5), AD)
+        self.assertEqual(self.feed(line, None, None, 1.0), GAME, "no opinion for 3 s: can't tell, show the game")
+        self.assertEqual(self.feed(line, None, False, 10.5), AD)
+        self.assertEqual(self.feed(line, True, False, 1.0), GAME, "a trusted graphic outranks it at once")
+
+    def test_no_picture_at_all_still_shows_the_game_after_the_grace_period(self):
+        line = Timeline(unknown_grace_s=3.0)
+        line.feed(True, 30)
+        line.feed(False, 30)
+        self.assertEqual(line.states[-1], AD)
+        self.assertEqual(line.feed(None, 3.5), GAME, "the window went away: nothing to cover")
 
     def test_return_needs_twenty_seconds_so_a_stadium_ad_cannot_reopen_a_break(self):
         line = Timeline()
@@ -144,6 +162,28 @@ class ImageModel(unittest.TestCase):
             line.t += 0.25
         self.assertEqual(state, AD)
 
+    def test_a_quick_return_is_not_undone_by_the_model_rule_either(self):
+        """Replay 2026-09-26: the bumper came back for one frame and was hidden again, because the
+        slow verdict had said "commercial" for well over 10 s and the splice window had closed
+        with the AD it belonged to."""
+        line = Timeline(boundary_exit_s=2.0, scene_enter_s=10.0)
+        line.feed(True, 30)
+        f = line.fusion
+        for _ in range(int(60 * FPS)):  # a break, nothing trusted any more (graphics unknown), model says commercial
+            f.update(None, line.t, scene=False)
+            line.t += 0.25
+        self.assertEqual(f.state, AD)
+        f.update(None, line.t, scene=False, black=True)
+        line.t += 0.25
+        for _ in range(int(3 * FPS)):
+            state = f.update(None, line.t, scene=False, quick=True)
+            line.t += 0.25
+        self.assertEqual(state, GAME)
+        for _ in range(int(8 * FPS)):  # the slow verdict still says commercial for a while
+            state = f.update(None, line.t, scene=False, quick=True)
+            line.t += 0.25
+        self.assertEqual(state, GAME, "the model rule needs a fresh 10 s, and the quick verdict vetoes it meanwhile")
+
     def test_without_a_cut_to_black_the_quick_verdict_has_to_wait(self):
         line = Timeline(boundary_exit_s=2.0, scene_exit_s=20.0)
         line.feed(True, 30)
@@ -167,18 +207,22 @@ class ImageModel(unittest.TestCase):
             line.t += 0.25
         self.assertEqual(state, AD)
 
-    def test_after_a_viewers_ad_the_quick_path_is_closed(self):
-        line = Timeline(boundary_exit_s=2.0)
+    def test_after_a_viewers_ad_only_a_cut_to_black_lets_the_model_end_the_break(self):
+        line = Timeline(boundary_exit_s=2.0, scene_exit_s=20.0)
         line.feed(True, 30)
         line.fusion.correct(AD)
         line.feed(False, 10)
         f = line.fusion
-        f.update(False, line.t, black=True)
+        for _ in range(int(30 * FPS)):  # the slow path stays closed: the viewer said this is an ad
+            state = f.update(False, line.t, scene=True, quick=True)
+            line.t += 0.25
+        self.assertEqual(state, AD)
+        f.update(False, line.t, black=True)  # a splice: something new starts
         line.t += 0.25
-        for _ in range(int(5 * FPS)):
+        for _ in range(int(3 * FPS)):
             state = f.update(False, line.t, scene=False, quick=True)
             line.t += 0.25
-        self.assertEqual(state, AD, "only graphics or the viewer end a break the viewer asked for")
+        self.assertEqual(state, GAME)
 
     def test_a_viewers_ad_hold_listens_to_graphics_only(self):
         line = Timeline()

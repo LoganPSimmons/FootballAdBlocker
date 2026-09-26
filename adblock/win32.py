@@ -208,9 +208,13 @@ def is_minimized(hwnd: int) -> bool:
     return bool(user32.IsIconic(hwnd))
 
 
+FULLSCREEN_SLACK = 2  # px: Fubo's fullscreen player was reported as 1920x1079 for a while (live 2026-09-26)
+
+
 def is_fullscreen(hwnd: int) -> bool:
-    """True when the window covers its whole monitor (Chrome's F11 / video fullscreen)."""
-    return window_rect(hwnd) == monitor_rect(hwnd)
+    """True when the window covers its whole monitor (Chrome's F11 / video fullscreen), give or
+    take a pixel or two on any edge."""
+    return all(abs(a - b) <= FULLSCREEN_SLACK for a, b in zip(window_rect(hwnd), monitor_rect(hwnd)))
 
 
 def foreground_window() -> int:

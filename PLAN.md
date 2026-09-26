@@ -340,6 +340,29 @@ this network looks like to the detector, and what changed because of it:
   the app only knew "YouTube TV" titles and went blind; `title_contains` now takes alternatives
   (`YouTube TV|Fubo`), Fubo's picture captures fine, and the app was restarted for it.
 
+**Utah @ Iowa State on FOX via Fubo** (from 12:37): the app relaunched for the new service could
+not hide the first break (77 s after launch, nothing trusted yet), and Logan - watching the
+status line say "looks like a commercial" next to a leaking ad - switched automatic mode off and
+asked for the model to be trusted: *"I am seeing ads even when the image model says it is an ad
+and the detector doesn't see anything."* Two changes, both his call:
+
+- **The image model may now hide by itself when nothing vouches for the game:** no learned
+  graphic on screen (missing, or nothing trusted yet) and "commercial" for 10 s → AD. With a
+  graphic on screen its opinion still hides nothing; the graphics rule's 5 s stays the normal
+  path. Replayed on that first Fubo session (labels = his own manual toggles): **29 % → 89 % of
+  the ad time covered** (338 s → 54 s leaked), broadcast hidden 1.2 s → 6.8 s (one return 5.7 s
+  slower than his click). The seven-session risk figure is in the next paragraph.
+- **A splice to black can end a break the viewer hid by hand.** His pattern is to click "AD" at
+  the first ad; the return then came only from graphics or another click. The quick return now
+  applies after a viewer's "AD" too; the slow 20 s return stays closed, as before.
+
+And a robustness bug the same session exposed: for three seconds the fullscreen window was
+reported as 1920×**1079**, the detector called that a new picture geometry with nothing learned,
+and the old "can't tell for 3 s → show the game" rule put a Liberty Mutual ad back on screen
+mid-break (Logan clicked 4 s later). Fullscreen now tolerates 2 px, all fullscreen pictures share
+one graphics library (they analyse to the same 640×360), and evidence going unknown no longer
+ends a break while the image model keeps calling it a commercial.
+
 **Indicator study** (`tools/explore_features.py`; every frame of the seven labelled sessions,
 31,805 frames, 49 min of ads). Each candidate was scored overall and *where a learned graphic was
 missing* - the only place an extra indicator would be consulted. What it found:

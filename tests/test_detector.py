@@ -49,6 +49,31 @@ class Broadcast:
         return {state for t, state in self.log if start <= t < end}
 
 
+class FullscreenPixelSlack(unittest.TestCase):
+    def test_a_one_pixel_change_of_the_fullscreen_window_keeps_the_library(self):
+        """Live 2026-09-26 (Fubo): the fullscreen window was reported 1920x1079 for a while; the
+        detector started a fresh library for the new size and forgot everything mid-break."""
+        detector = Detector()
+        t = 0.0
+
+        def frame(height, *graphics):
+            small = texture()
+            for draw in graphics:
+                draw(small)
+            return cv2.resize(small, (1920, height), interpolation=cv2.INTER_CUBIC)
+
+        def play(seconds, height, *graphics):
+            nonlocal t
+            for _ in range(int(seconds * FPS)):
+                seen = detector.process(frame(height, *graphics), t, fullscreen=True)
+                t += 1 / FPS
+            return seen
+
+        self.assertTrue(play(150, 1080, scorebug, corner_bug).game_like)
+        self.assertTrue(play(2, 1079, scorebug, corner_bug).game_like, "same graphics, same library")
+        self.assertEqual(play(8, 1079).state, AD, "and their absence still counts")
+
+
 class SyntheticBroadcast(unittest.TestCase):
     def test_learns_graphics_hides_ads_never_hides_play(self):
         tv = Broadcast()

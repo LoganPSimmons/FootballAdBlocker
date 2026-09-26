@@ -11,7 +11,8 @@ an ad is cheap. So:
                 to stay for ``weak_exit_s`` - a young, small region can match a commercial's
                 logo-dense end card for a second or two (live 2026-09-19), never for four
   unknown       while in AD, evidence going unknown for ``unknown_grace_s`` drops back to
-                GAME: when we can no longer tell, we show the game
+                GAME: when we can no longer tell, we show the game (unless the image model
+                has called it a commercial within that time)
   flapping      two or more short graphics-free "blips" within two minutes (a halftime show
                 flashing score graphics on and off; real breaks last minutes, not seconds)
                 raise the entry delay to ``calm_enter_ad_s``: sound and picture stop cutting
@@ -31,9 +32,16 @@ is calling football-looking ads the broadcast:
                 picture back. Breaks end through a splice to black, and on ABC/ESPN the
                 broadcast comes back on a 20 s sponsor bumper with no graphic at all (live
                 2026-09-26: the viewer clicked "GAME" 16 s and 10 s after two such returns).
-                Being wrong here shows a football-looking ad for a few seconds - the cheap side
-  never         it cannot hide anything by itself; viewer holds listen to graphics only; and
-                after the viewer has said "AD", only graphics (or the viewer) end that break
+                Being wrong here shows a football-looking ad for a few seconds - the cheap side.
+                This path is open even after the viewer's own "AD": a splice to black starts
+                something new
+  alone         with no graphic on screen - missing, or nothing trusted yet (the first minutes
+                after a launch) - "commercial" for ``scene_enter_s`` hides. Asked for by the
+                viewer 2026-09-26 after watching its verdicts beside leaking ads; the expensive
+                mistake (the broadcast called a commercial for 10 s straight while no graphic
+                is up) is measured on every recorded session before each change
+  holds         viewer holds listen to graphics only; after the viewer has said "AD", only
+                graphics, a splice to black, or the viewer end that break
 
 A viewer correction ("that's an ad" / "that's the game") wins immediately and is *held until
 the evidence agrees with it*; from then on the machine carries on by itself. So a correction
@@ -58,6 +66,7 @@ class FusionSettings:
     exit_ad_frames: int = 3
     weak_exit_s: float = 4.0  # how long a not-yet-established graphic must stay to bring the game back
     scene_exit_s: float = 20.0  # how long the image model must keep saying "broadcast" to end an AD by itself
+    scene_enter_s: float = 10.0  # ...and "commercial", with no graphic on screen, to start one (inf: never)
     boundary_window_s: float = 15.0  # a cut to black this recent = a splice: the quick verdict may end the AD...
     boundary_exit_s: float = 2.0  # ...once it has said "broadcast" for this long since the black frame
     unknown_grace_s: float = 3.0
@@ -80,9 +89,12 @@ class Fusion:
         self._absent_since: float | None = None
         self._unknown_since: float | None = None
         self._scene_since: float | None = None  # since when the image model has kept saying "broadcast"
+        self._scene_ad_since: float | None = None  # ...or "commercial"
+        self._scene_ad_last: float | None = None  # when it last said "commercial"
         self._quick_since: float | None = None  # same for its quick (three-second) verdict
         self._scene_may_return = True  # False from a viewer's "AD" until graphics are next seen
         self._black_at: float | None = None  # the last cut to black
+        self._boundary_until: float = float("-inf")  # a cut to black inside a break opens the quick path until then
         self._ad_since: float | None = None  # when the current AD began
         self._blips: deque[float] = deque(maxlen=16)  # when recent short graphics-free stretches ended
 
@@ -102,15 +114,20 @@ class Fusion:
         ``black``: this frame is a cut to black; ``quick``: the image model's opinion over the
         last three seconds only). Returns the state the app should be in."""
         s = self.settings
-        if black:
-            self._black_at = t
         if self.state == AD and self._ad_since is None:
             self._ad_since = t
+        if black:
+            self._black_at = t
+            if self.state == AD:  # a splice inside a break: the quick path stays open past the return itself
+                self._boundary_until = t + s.boundary_window_s
         self._scene_since = (t if self._scene_since is None else self._scene_since) if scene else None
         scene_for = t - self._scene_since if self._scene_since is not None else 0.0
+        self._scene_ad_since = (t if self._scene_ad_since is None else self._scene_ad_since) if scene is False else None
+        scene_ad_for = t - self._scene_ad_since if self._scene_ad_since is not None else 0.0
+        if scene is False:
+            self._scene_ad_last = t
         self._quick_since = (t if self._quick_since is None else self._quick_since) if quick else None
-        boundary = (self._black_at is not None and self._ad_since is not None and self._black_at > self._ad_since
-                    and t - self._black_at <= s.boundary_window_s)
+        boundary = t <= self._boundary_until
         quick_for = t - max(self._quick_since, self._black_at) if boundary and self._quick_since is not None else 0.0
         self._strong_run = self._strong_run + 1 if game_like and strong else 0
         if game_like is None:
@@ -140,15 +157,21 @@ class Fusion:
 
         flapping = sum(t - when <= s.flap_window_s for when in self._blips) >= s.flap_blips
         vetoed = bool(scene) or (boundary and bool(quick))  # the picture looks like the broadcast: don't hide
-        if self.state == GAME and absent_for >= (s.calm_enter_ad_s if flapping else s.enter_ad_s) and not vetoed:
+        delay = s.calm_enter_ad_s if flapping else s.enter_ad_s
+        graphics_say_ad = absent_for >= delay
+        model_says_ad = not game_like and scene_ad_for >= max(s.scene_enter_s, delay)  # nothing vouches for the game
+        if self.state == GAME and not vetoed and (graphics_say_ad or model_says_ad):
             self.state, self._ad_since = AD, t
-        elif self.state == AD and (present or (self._scene_may_return
-                                               and (scene_for >= s.scene_exit_s or quick_for >= s.boundary_exit_s))):
+        elif self.state == AD and (present or (self._scene_may_return and scene_for >= s.scene_exit_s)
+                                   or quick_for >= s.boundary_exit_s):
             self.state = GAME
-            if not present:  # brought back by the image model: the graphics rule starts its clock afresh
+            if not present:  # brought back by the image model: both hiding rules start their clocks afresh
                 self._absent_since = t
-        elif self.state == AD and self._unknown_since is not None and t - self._unknown_since >= s.unknown_grace_s:
-            self.state = GAME
+                self._scene_ad_since = None
+        elif (self.state == AD and self._unknown_since is not None
+              and t - max(self._unknown_since, float("-inf") if self._scene_ad_last is None else self._scene_ad_last)
+              >= s.unknown_grace_s):
+            self.state = GAME  # can't tell, and the image model has not called it a commercial for a while
         if self.state == GAME:
             self._ad_since = None
         return self.state
