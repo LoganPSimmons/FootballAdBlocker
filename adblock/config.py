@@ -14,7 +14,7 @@ DEFAULT_PATH = ROOT / "config.toml"
 class Config:
     hotkey: str = "F9"  # toggles GAME <-> AD; works while Chrome is fullscreen and focused
     quit_hotkey: str = "ctrl+shift+F9"  # clean exit without leaving fullscreen
-    title_contains: str = "YouTube TV"  # how the stream's Chrome window is recognised
+    title_contains: str = "YouTube TV|Fubo"  # how the stream's Chrome window is recognised: any of these in its title
     game: str = ""  # team to look up on ESPN for the score, e.g. "utah" or "USU"
     label: str = ""  # session folder label; defaults to the game, then "session"
     stream_delay_s: float = 45.0  # spoiler guard: show ESPN data only once it is this old

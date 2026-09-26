@@ -4,13 +4,15 @@ Watch college football on the PC; when an ad break starts, the tool mutes the st
 covers it with a live stats screen (score, win odds, recent plays, box score, other
 games); when the game comes back, it gets out of the way. No more manual mute-and-hide.
 
-Status (2026-09-19): **Phase 0 done** (S1–S3 pass, S4 negative — results below). Phase 1
+Status (2026-09-26): **Phase 0 done** (S1–S3 pass, S4 negative — results below). Phase 1
 built and tried. Then **Logan changed the order**: instead of labelling whole games by hand
 before any detector exists, the app should hide ads by itself from the start, be corrected with
 one click when wrong, and learn from those corrections. So Phase 3's detector and Phase 4's
 auto mode are **built and running** (section "Auto mode, as built" below), driven from a control
-window + tray icon; the hotkey is now just one of the ways to correct it. What is still ahead:
-the stats dashboard (Phase 2), the learned scene classifier (Phase 5) and polish (Phase 6).
+window + tray icon; the hotkey is now just one of the ways to correct it. Two live days so far:
+FOX on YouTube TV (2026-09-19) and ABC/ESPN on YouTube TV, then FOX on Fubo (2026-09-26, section
+"Second live day"). What is still ahead: a full hands-off game, the stats dashboard (Phase 2), the
+learned scene classifier (Phase 5) and polish (Phase 6).
 
 ## Setup this is designed for
 
@@ -292,7 +294,79 @@ carry broadcast-like graphics.
 Known limits: needs 1–2 min of game picture before it can hide anything (and again after
 leaving/entering fullscreen — masks are pixel-exact per window size); an "AD" said before
 anything is learned can't end by itself (the status line says so); entry is ~5 s late by
-design; all of it is only verified on FOX so far.
+design; verified on FOX and ABC/ESPN (the latter needs the image model - see "Second live day").
+
+## Second live day (2026-09-26): ABC/ESPN, then FOX on Fubo - and the indicator study
+
+**Texas @ Tennessee on ABC** (YouTube TV, 34 min of the 4th quarter, 5 clicks by Logan). What
+this network looks like to the detector, and what changed because of it:
+
+- Graphics learned unaided at 121 s (an early "GAME" click seeded them): the ESPN scorebug
+  (bottom centre, on screen in 75 % of live frames) and the "SEC on abc" corner bug (top left,
+  81-86 %). **Unlike FOX's, ABC's corner bug leaves the screen** during post-score packages
+  (15-20 s of celebration shots, then a full-score graphic) and on some live shots. Three such
+  packages: all carried by the image model's veto, 0 s hidden. Without the model this network
+  would have had ~12 s of broadcast hidden after every score.
+- **First break, a real bug:** the small corner bug (448 edge pixels) scored 0.77-0.89 on dense
+  crowd shots - edges everywhere hit 80 % of any logo by chance - so it flickered "present" twice
+  while gone, two blips armed the flap damper, the entry delay became 30 s, and Logan clicked "AD"
+  one second into the ad. Fix in `scorebug.Region.score`: the score is also capped at the hit
+  rate's **excess over the edge density around the graphic**. Measured: those false matches now
+  score at most 0.61, a bug that is really there at least 0.87 - including FOX's corner bug on
+  its mountain-shot return bumper, a *perfect* hit where 90 % of the surrounding pixels are edges
+  (a first version with a floored denominator scored that 0.37 and delayed one FOX return by
+  8 s; the floor was the mistake). All six FOX sessions replay identically before and after,
+  graphics only and with the model (38.3 s hidden, 27 transitions).
+- The 2nd and 3rd entries were hands-off: AD 7.8 s and 4 s after the ad began (the veto lifting).
+- **Returns are the network's problem.** Every ABC break ends with a splice to black (2.2 s and
+  0.7 s of black frames at 4 fps) and a ~20 s sponsor-billboard bumper with no graphic at all; the
+  20 s image-model rule brought the picture back only when the graphics did (23 s and 19 s after
+  the broadcast), and Logan clicked "GAME" at 16 s and 10 s. Now `fusion.py` has a **quick return**:
+  after a cut to black inside a break, the image model's *three-second* verdict saying "broadcast"
+  for 2 s ends the AD (the black frame is a splice; being wrong shows a football-looking ad for a
+  few seconds, and it is re-hidden after the usual 5 s). The quick verdict also vetoes re-entry
+  while the splice is fresh - the first version flipped straight back to AD on the next frame
+  (caught by its unit test). Replayed unaided with the model on this session: **0.0 s of
+  broadcast hidden instead of 23.3 s**, returns 3.7 s and 4.2 s after the broadcast came back.
+  The third break had no black frame and returned on the graphics as before.
+- **A label rule was wrong:** Logan's late "GAME" click undid the detector's whole 165 s break in
+  `labels.py`, so the evaluator reported ~200 s "hidden" for a break that was real. Now a click
+  within 45 s of the detector's own switch undoes it; a later "GAME" is a late reaction and is
+  back-dated 10-45 s to where the picture started looking like the broadcast (graphics or the
+  image model's verdict, which `detector.csv` records); a later "AD" is a new break.
+- He also watched in a normal maximized window for a while: the graphics were learned afresh for
+  that geometry in 2 min, and a break was entered 4 s after the ad and left 3.6 s after the
+  graphics returned (young regions use the 4 s rule). Then he moved to **Fubo** for the Utah game:
+  the app only knew "YouTube TV" titles and went blind; `title_contains` now takes alternatives
+  (`YouTube TV|Fubo`), Fubo's picture captures fine, and the app was restarted for it.
+
+**Indicator study** (`tools/explore_features.py`; every frame of the seven labelled sessions,
+31,805 frames, 49 min of ads). Each candidate was scored overall and *where a learned graphic was
+missing* - the only place an extra indicator would be consulted. What it found:
+
+| Indicator | Fires in ad frames | in game frames | When it fires | Verdict |
+| --- | --- | --- | --- | --- |
+| Letterbox bars | 9.4 % | 0.1 % (label noise: an ad in the 5 s before a switch) | 98 % ad | Certain-ad marker, rare. Not built: nothing measured needs it yet |
+| Pillarbox bars | 1.4 % | 0.0 % | 99-100 % ad | Same |
+| Black frame | 1.0 % | 0.1 % | 89 % ad | A boundary, not content: gates the quick return |
+| Frozen picture | 3.0 % | 0.4 % | 82 % ad | No (a paused stream, a static studio shot) |
+| Shot cut rate | AD median 20/min vs GAME 8 (AUC 0.82) | | | Useless where needed: 22 vs 14 with graphics missing - replays and packages cut as fast as ads |
+| Grass share | GAME median 0.08 vs AD 0.003 | | | Useless where needed: bumpers and studio shots have no grass either (0.03) |
+| Saturation, brightness, dark share | AUC 0.5-0.7 | | | No |
+| Audio: silence dips (Chrome's session peak meter at 20 Hz - it reads while muted; ≥ 0.15 s under 0.004) | 5 in 7.9 min of ads | 1 in 19 min of game (Logan's channel switch) | | Clean but sparse: one per ~100 s of ads, too few to time entries. Not built |
+| Audio: sustained level (10th percentile over 10 s) | AD 0.059 vs GAME 0.082 [0.066-0.092] | | | Weak (AUC 0.66) |
+
+The research behind the candidates: Comskip and the DVR literature use black frames + silence to
+cut a recording into blocks, then classify blocks by logo presence, shot-change rate, aspect
+ratio, closed captions and the 15/30/60 s durations; our learned graphics *are* the logo method,
+the rest is measured above. The YouTube player marks inserted ads in its DOM (`ad-showing`), but
+YouTube TV live is unverified and it would cover only inserted ads, not the broadcast's own - not
+pursued.
+
+**Where that leaves the exit criteria:** Phase 3's second network is measured (ABC/ESPN: every
+break found, 0 s hidden in the unaided replay with the model). Phase 4's hands-off game is not
+yet: 5 clicks in 34 min, of which 2 were the cold start after a launch, 2 the slow returns fixed
+above, 1 beat the entry delay by a second.
 
 ## Phases
 
@@ -374,16 +448,19 @@ intervals, spoiler delay via `wallclock`), game picker, the panels above as a lo
 HTML/JS page inside the overlay. *Exit:* ad-mode screen shows live, correctly delayed data.
 
 **Phase 3 — Scorebug detector + evaluator** — 🟡 **built 2026-09-19, pulled forward at
-Logan's request; exit not met yet.** Static-edge mask learner, matcher, state machine;
-`evaluate.py` over recorded sessions. Shadow mode survives as the "Hide ads automatically"
+Logan's request; second network measured 2026-09-26.** Static-edge mask learner, matcher, state
+machine; `evaluate.py` over recorded sessions. Shadow mode survives as the "Hide ads automatically"
 switch. *Exit:* on ≥ 2 recorded games from different networks: game-seconds hidden < ~5 per
-game, > 90 % of ad time covered. *So far:* one game, FOX only — 0 game-seconds hidden, every
-break found (details in "Auto mode, as built").
+game, > 90 % of ad time covered. *So far:* FOX (2026-09-19): 0 game-seconds hidden, every break
+found; ABC/ESPN (2026-09-26, 34 min): every break found, 0.0 s hidden with the image model
+(unaided replay), 88 % of ad time covered - the rest is the cold start. Details in "Auto mode, as
+built" and "Second live day".
 
 **Phase 4 — Auto mode** — 🟡 **built 2026-09-19; exit needs a full game.** Detector drives
 mute + overlay; corrections from the ad screen, control window, tray or hotkey, logged as
 labels and fed to the learner; PiP thumbnail. *Exit:* a full game hands-off with at most a
-couple of corrections.
+couple of corrections. *So far:* 5 clicks in 34 min on ABC (2026-09-26): 2 at the cold start,
+2 on slow returns (fixed since), 1 beating the entry delay by a second.
 
 **Phase 5 — Learned classifier (and audio only if needed)** — 🟡 **started 2026-09-19:
 zero-shot CLIP measured and fused in with limited powers; the trained probe is still to come.** Embeddings + linear probe

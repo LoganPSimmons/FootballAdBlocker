@@ -260,6 +260,13 @@ def top_level_windows() -> list[int]:
     return hwnds
 
 
+def title_matches(title: str, title_contains: str | None) -> bool:
+    """Does the window title name the stream? ``title_contains`` lists alternatives separated
+    by ``|`` ("YouTube TV|Fubo"), matched case-insensitively; an empty setting matches nothing."""
+    needles = [part.strip().lower() for part in (title_contains or "").split("|") if part.strip()]
+    return any(needle in title.lower() for needle in needles)
+
+
 def find_chrome_windows(title_contains: str | None = None) -> list[WindowInfo]:
     """Visible, titled, top-level windows that belong to chrome.exe.
 
@@ -267,7 +274,6 @@ def find_chrome_windows(title_contains: str | None = None) -> list[WindowInfo]:
     beats smaller. With ``title_contains`` set, non-matching windows are still returned
     (after the matches) so callers can report what *was* found.
     """
-    needle = (title_contains or "").lower()
     found: list[WindowInfo] = []
     for hwnd in top_level_windows():
         if not user32.IsWindowVisible(hwnd) or is_cloaked(hwnd):
@@ -278,14 +284,13 @@ def find_chrome_windows(title_contains: str | None = None) -> list[WindowInfo]:
         if info.exe != CHROME_EXE or not info.title:
             continue
         found.append(info)
-    found.sort(key=lambda w: (bool(needle) and needle in w.title.lower(), w.width * w.height), reverse=True)
+    found.sort(key=lambda w: (title_matches(w.title, title_contains), w.width * w.height), reverse=True)
     return found
 
 
 def find_stream_window(title_contains: str = "YouTube TV") -> WindowInfo | None:
     """The Chrome window showing the stream: a title match, else None."""
-    needle = title_contains.lower()
     for info in find_chrome_windows(title_contains):
-        if needle in info.title.lower() and not is_minimized(info.hwnd):
+        if title_matches(info.title, title_contains) and not is_minimized(info.hwnd):
             return info
     return None

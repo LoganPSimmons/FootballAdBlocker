@@ -37,7 +37,7 @@ from adblock import win32
 from adblock.capture import FrameSource
 
 FRAME_COLUMNS = ["index", "t", "wall", "file", "state", "src_w", "src_h"]
-DETECTOR_COLUMNS = ["t", "app_state", "detector_state", "game_like", "override", "auto", "scores", "scene", "scene_score"]
+DETECTOR_COLUMNS = ["t", "app_state", "detector_state", "game_like", "override", "auto", "scores", "scene", "scene_score", "black"]
 
 
 def slugify(text: str) -> str:
@@ -113,7 +113,7 @@ class SessionWriter:
 
     def add_detection(self, at: float, app_state: str, detector_state: str, game_like: bool | None,
                       override: str | None, auto: bool, scores: list[float],
-                      scene: bool | None = None, scene_score: float | None = None) -> None:
+                      scene: bool | None = None, scene_score: float | None = None, black: bool = False) -> None:
         """One analysed frame's evidence. Flushed every few seconds - it is a lot of tiny rows."""
         with self._lock:
             if self._detector_file.closed:
@@ -121,7 +121,8 @@ class SessionWriter:
             self._detector.writerow([self.seconds(at), app_state, detector_state,
                                      "" if game_like is None else int(game_like), override or "", int(auto),
                                      " ".join(f"{score:.2f}" for score in scores),
-                                     "" if scene is None else int(scene), "" if scene_score is None else f"{scene_score:.2f}"])
+                                     "" if scene is None else int(scene), "" if scene_score is None else f"{scene_score:.2f}",
+                                     int(black)])
             self._detector_rows += 1
             if self._detector_rows % 20 == 0:
                 self._detector_file.flush()
@@ -153,12 +154,12 @@ class RecordingThread(threading.Thread):
                  hwnd: int, title_contains: str) -> None:
         super().__init__(name="recorder", daemon=True)
         self.source, self.writer, self.get_state = source, writer, get_state
-        self.hwnd, self.needle = hwnd, title_contains.lower()
+        self.hwnd, self.title_contains = hwnd, title_contains
         self.paused = False
 
     def run(self) -> None:
         for frame in self.source:
-            on_stream = self.needle in win32.window_title(self.hwnd).lower()
+            on_stream = win32.title_matches(win32.window_title(self.hwnd), self.title_contains)
             if on_stream == self.paused:  # changed
                 self.paused = not on_stream
                 self.writer.log("recording", status="paused: window is not showing the stream" if self.paused else "resumed")

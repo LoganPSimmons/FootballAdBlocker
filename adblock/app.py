@@ -89,16 +89,19 @@ class DetectorThread(threading.Thread):
     """Runs every captured frame through the detector. Like the recorder it never looks at
     the window while it shows another tab: that is reported as "can't see the stream"."""
 
-    def __init__(self, source: WgcWindowSource, detector: Detector, hwnd: int, title_contains: str, emit, scene_opinion) -> None:
+    def __init__(self, source: WgcWindowSource, detector: Detector, hwnd: int, title_contains: str, emit,
+                 scene_opinion, quick_opinion) -> None:
         super().__init__(name="detector", daemon=True)
-        self.source, self.detector, self.hwnd, self.needle, self.emit = source, detector, hwnd, title_contains.lower(), emit
+        self.source, self.detector, self.hwnd, self.title_contains, self.emit = source, detector, hwnd, title_contains, emit
         self.scene_opinion = scene_opinion  # () -> True / False / None, from the image model if there is one
+        self.quick_opinion = quick_opinion  # the same over the last three seconds only
 
     def run(self) -> None:
         for frame in self.source:
             try:
-                if self.needle in win32.window_title(self.hwnd).lower():
-                    seen = self.detector.process(frame.image, frame.t, win32.is_fullscreen(self.hwnd), self.scene_opinion())
+                if win32.title_matches(win32.window_title(self.hwnd), self.title_contains):
+                    seen = self.detector.process(frame.image, frame.t, win32.is_fullscreen(self.hwnd),
+                                                 self.scene_opinion(), self.quick_opinion())
                 else:
                     seen = self.detector.unknown(frame.t)
             except Exception:  # a bad frame must not end detection for the rest of the game
@@ -188,7 +191,7 @@ class Controller(QtCore.QObject):
         if self.writer:
             RecordingThread(self.source, self.writer, lambda: self.state, stream.hwnd, self.config.title_contains).start()
         DetectorThread(self.source, self.detector, stream.hwnd, self.config.title_contains, self.observed.emit,
-                       self.scene_opinion).start()
+                       self.scene_opinion, self.quick_opinion).start()
         self.observation_at = time.perf_counter()
         self.log("capture", status="acquired", hwnd=stream.hwnd, title=stream.title)
         say(f"Watching Chrome window {stream.hwnd:#x}: {stream.title!r}")
@@ -228,13 +231,16 @@ class Controller(QtCore.QObject):
 
     def stream_picture(self):
         """The newest frame of the stream for the image model - never of another tab."""
-        if not (self.source and self.stream) or self.config.title_contains.lower() not in win32.window_title(self.stream.hwnd).lower():
+        if not (self.source and self.stream) or not win32.title_matches(win32.window_title(self.stream.hwnd), self.config.title_contains):
             return None
         frame = self.source.latest()
         return frame.image if frame is not None else None
 
     def scene_opinion(self) -> bool | None:
         return self.scene.verdict() if self.scene and self.use_scene else None
+
+    def quick_opinion(self) -> bool | None:
+        return self.scene.fast_verdict() if self.scene and self.use_scene else None
 
     def set_scene(self, enabled: bool) -> None:
         if enabled != self.use_scene:
@@ -276,7 +282,7 @@ class Controller(QtCore.QObject):
         self.observation, self.observation_at = seen, time.perf_counter()
         if self.writer:
             self.writer.add_detection(seen.t, self.state, seen.state, seen.game_like, seen.override, self.auto, seen.scores,
-                                      seen.scene, self.scene.latest() if self.scene else None)
+                                      seen.scene, self.scene.latest() if self.scene else None, seen.black)
             if seen.learned and self.source and (frame := self.source.latest()) is not None and self.stream:
                 picture = self.detector.picture(frame.image, win32.is_fullscreen(self.stream.hwnd))
                 if picture is not None:
@@ -317,7 +323,7 @@ class Controller(QtCore.QObject):
         hwnd = self.stream.hwnd
         if win32.is_minimized(hwnd):
             return "stream window is minimized"
-        if self.config.title_contains.lower() not in win32.window_title(hwnd).lower():
+        if not win32.title_matches(win32.window_title(hwnd), self.config.title_contains):
             return "stream window shows another tab"
         in_front = win32.app_window_in_front(hwnd, ignore=(self.overlay.hwnd,))
         if in_front:  # exe only - other apps' window titles are none of the timeline's business

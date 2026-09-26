@@ -3,7 +3,7 @@
 
 hotkey = "F9"                  # toggle ad mode. Examples: "F9", "pause", "ctrl+alt+m". Not "F12" (reserved by Windows).
 quit_hotkey = "ctrl+shift+F9"  # quit cleanly (unmutes Chrome) without leaving fullscreen
-title_contains = "YouTube TV"
+title_contains = "YouTube TV|Fubo"  # the stream's Chrome window has one of these in its title ("|" separates alternatives)
 game = ""                      # e.g. "utah" - which game's score to show on the overlay
 stream_delay_s = 45.0          # spoiler guard: how far YouTube TV runs behind ESPN's feed
 pip = true

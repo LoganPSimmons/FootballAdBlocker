@@ -45,6 +45,7 @@ AD_PROMPTS = [
 ]
 SMOOTH_S = 9  # verdicts are the median of the last nine one-per-second scores (a few seconds late is fine)
 MIN_SCORES = 5
+FAST_S = 3  # the quick verdict right after a cut to black: median of the last three scores (fusion.py)
 MARGIN = 0.15  # |P(broadcast) - 0.5| below this = no opinion
 
 
@@ -56,11 +57,13 @@ def available() -> bool:
     return find_spec("torch") is not None and find_spec("open_clip") is not None
 
 
-def verdict_from(scores) -> bool | None:
-    """True: looks like the broadcast. False: looks like a commercial. None: no opinion (yet)."""
-    if len(scores) < MIN_SCORES:
+def verdict_from(scores, window: int = SMOOTH_S, minimum: int = MIN_SCORES) -> bool | None:
+    """True: looks like the broadcast. False: looks like a commercial. None: no opinion (yet).
+
+    The median of the last ``window`` scores, once at least ``minimum`` exist."""
+    if len(scores) < minimum:
         return None
-    middle = float(np.median(list(scores)[-SMOOTH_S:]))
+    middle = float(np.median(list(scores)[-window:]))
     return True if middle > MARGIN else False if middle < -MARGIN else None
 
 
@@ -106,6 +109,10 @@ class SceneWatcher(threading.Thread):
 
     def verdict(self) -> bool | None:
         return verdict_from(self.scores)
+
+    def fast_verdict(self) -> bool | None:
+        """The last three seconds only - consulted right after a cut to black (fusion.py)."""
+        return verdict_from(self.scores, FAST_S, FAST_S)
 
     def latest(self) -> float | None:
         return self.scores[-1] if self.scores else None

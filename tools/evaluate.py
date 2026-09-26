@@ -32,22 +32,25 @@ from adblock.labels import effective_labels  # noqa: E402
 from collections import deque  # noqa: E402
 
 from adblock.detect.detector import Detector, FusionSettings  # noqa: E402
-from adblock.detect.scene import SMOOTH_S, verdict_from  # noqa: E402
+from adblock.detect.scene import FAST_S, SMOOTH_S, verdict_from  # noqa: E402
 
 
 def clock(seconds: float) -> str:
     return f"{int(seconds) // 60}:{seconds % 60:04.1f}"
 
 
-def recorded_evidence(session: Path) -> list[tuple[float, bool | None]]:
-    """(t, game_like) as the live detector logged it, for back-dating missed breaks."""
+def recorded_evidence(session: Path) -> list[tuple[float, bool | None, bool | None]]:
+    """(t, game_like, scene) as the live detector logged it, for back-dating corrections."""
     path = session / "detector.csv"
     if not path.exists():
         return []
     import csv
 
+    def flag(value: str | None) -> bool | None:
+        return None if not value else value == "1"
+
     with open(path, newline="", encoding="utf-8") as handle:
-        return [(float(r["t"]), None if r["game_like"] == "" else r["game_like"] == "1") for r in csv.DictReader(handle)]
+        return [(float(r["t"]), flag(r["game_like"]), flag(r.get("scene"))) for r in csv.DictReader(handle)]
 
 
 _scene_model = None
@@ -95,7 +98,8 @@ def replay(session: Path, settings: FusionSettings, with_corrections: bool = Fal
             detector.correct(clicks.pop(0)[1])
         while pending and pending[0][0] <= frame.t:
             recent.append(pending.pop(0)[1])
-        seen = detector.process(frame.image, frame.t, fullscreen_at(frame.t), verdict_from(recent) if scene else None)
+        seen = detector.process(frame.image, frame.t, fullscreen_at(frame.t), verdict_from(recent) if scene else None,
+                                verdict_from(recent, FAST_S, FAST_S) if scene else None)
         rows.append({"t": frame.t, "index": frame.index, "label": frame.label, "state": seen.state,
                      "game_like": seen.game_like, "best": seen.best, "regions": len(seen.scores), "learned": seen.learned})
     if not raw_labels:  # corrections say the stretch leading up to them was wrong: apply them backwards
@@ -179,12 +183,17 @@ def main() -> int:
     parser.add_argument("--exit-frames", type=int, default=FusionSettings.exit_ad_frames)
     parser.add_argument("--scene", action="store_true",
                         help="fuse in the image model (needs requirements-ml.txt and cached embeddings)")
+    parser.add_argument("--scene-exit", type=float, default=FusionSettings.scene_exit_s,
+                        help="seconds of uninterrupted 'looks like the broadcast' that end an AD (default 20)")
+    parser.add_argument("--boundary-exit", type=float, default=FusionSettings.boundary_exit_s,
+                        help="after a cut to black, seconds of the quick verdict 'broadcast' that end an AD (default 2; 0 disables)")
     parser.add_argument("--raw-labels", action="store_true",
                         help="score against the recorded state as is, without applying corrections backwards")
     parser.add_argument("--with-corrections", action="store_true",
                         help="also replay the viewer's recorded clicks (default: the detector unaided)")
     args = parser.parse_args()
-    settings = FusionSettings(enter_ad_s=args.enter_ad, exit_ad_frames=args.exit_frames)
+    settings = FusionSettings(enter_ad_s=args.enter_ad, exit_ad_frames=args.exit_frames, scene_exit_s=args.scene_exit,
+                              boundary_exit_s=args.boundary_exit if args.boundary_exit > 0 else float("inf"))
 
     sessions = args.sessions
     if not sessions:

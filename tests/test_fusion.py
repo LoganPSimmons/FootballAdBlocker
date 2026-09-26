@@ -117,6 +117,69 @@ class ImageModel(unittest.TestCase):
         self.feed(line, False, False, 30)
         self.assertEqual(self.feed(line, False, True, 21), GAME, "the studio show is back, and stays")
 
+    def test_a_cut_to_black_then_the_broadcast_brings_the_game_back_quickly(self):
+        """Live 2026-09-26 (ABC): breaks end with a splice to black, then a 20 s sponsor bumper
+        with no graphic; the viewer had to click GAME twice. After the black frame the
+        three-second verdict is trusted after 2 s instead of the usual 20."""
+        line = Timeline(boundary_exit_s=2.0, scene_exit_s=20.0)
+        line.feed(True, 30)
+        line.feed(False, 30)
+        self.assertEqual(line.states[-1], AD)
+        f = line.fusion
+        for _ in range(2):  # the splice
+            f.update(False, line.t, scene=False, black=True)
+            line.t += 0.25
+        states = []
+        for _ in range(int(2.5 * FPS)):  # the bumper: quick verdict says broadcast, the 9 s median still says ad
+            states.append(f.update(False, line.t, scene=False, quick=True))
+            line.t += 0.25
+        self.assertEqual(states[:4], [AD] * 4, "not before 2 s of the quick verdict")
+        self.assertEqual(states[-1], GAME)
+        for _ in range(int(4 * FPS)):  # the bumper goes on, graphics still missing, the slow verdict still "ad"
+            state = f.update(False, line.t, scene=False, quick=True)
+            line.t += 0.25
+        self.assertEqual(state, GAME, "a quick return is not undone by the graphics rule on the next frame")
+        for _ in range(int(6 * FPS)):  # it was a football-looking ad after all: hidden again after the usual 5 s
+            state = f.update(False, line.t, scene=False, quick=False)
+            line.t += 0.25
+        self.assertEqual(state, AD)
+
+    def test_without_a_cut_to_black_the_quick_verdict_has_to_wait(self):
+        line = Timeline(boundary_exit_s=2.0, scene_exit_s=20.0)
+        line.feed(True, 30)
+        line.feed(False, 30)
+        f = line.fusion
+        for _ in range(int(15 * FPS)):  # a football-looking ad in the middle of a break: no splice seen
+            state = f.update(False, line.t, scene=False, quick=True)
+            line.t += 0.25
+        self.assertEqual(state, AD)
+
+    def test_a_black_frame_before_the_break_began_is_not_a_boundary(self):
+        line = Timeline(boundary_exit_s=2.0)
+        line.feed(True, 30)
+        f = line.fusion
+        f.update(False, line.t, black=True)  # the cut to black that *starts* the break
+        line.t += 0.25
+        line.feed(False, 30)
+        self.assertEqual(line.states[-1], AD)
+        for _ in range(int(5 * FPS)):
+            state = f.update(False, line.t, scene=False, quick=True)
+            line.t += 0.25
+        self.assertEqual(state, AD)
+
+    def test_after_a_viewers_ad_the_quick_path_is_closed(self):
+        line = Timeline(boundary_exit_s=2.0)
+        line.feed(True, 30)
+        line.fusion.correct(AD)
+        line.feed(False, 10)
+        f = line.fusion
+        f.update(False, line.t, black=True)
+        line.t += 0.25
+        for _ in range(int(5 * FPS)):
+            state = f.update(False, line.t, scene=False, quick=True)
+            line.t += 0.25
+        self.assertEqual(state, AD, "only graphics or the viewer end a break the viewer asked for")
+
     def test_a_viewers_ad_hold_listens_to_graphics_only(self):
         line = Timeline()
         line.feed(True, 30)

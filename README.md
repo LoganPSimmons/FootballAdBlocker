@@ -1,6 +1,6 @@
 # Football Ad Blocker
 
-Companion app for watching college football on **YouTube TV in Chrome** (Windows 11). During
+Companion app for watching college football on **YouTube TV or Fubo in Chrome** (Windows 11). During
 an ad break it mutes Chrome and covers the stream with a stats screen; when the game is back
 it gets out of the way. It never touches the stream itself — it only looks at what is on
 screen. The approach, the measured feasibility results and the roadmap are in [PLAN.md](PLAN.md).
@@ -56,12 +56,19 @@ How it behaves:
   (seen on FOX), so the graphics alone can't tell it from commercials. That is what the optional
   **image model** is for (below): with it the show stays up and its commercials are hidden.
   Without it, click "That's the GAME" to watch the show and "That's an AD" for its commercials.
+- **Networks differ.** On FOX the corner logo stays through replays, packages and the return
+  bumper, so the graphics alone are nearly enough. On ABC/ESPN (seen 2026-09-26) the corner logo
+  *leaves* during post-score packages and on some live shots, and every break ends with a cut to
+  black and a ~20 s sponsor bumper that carries no graphic at all - there the image model does
+  the work: it keeps the picture up through the packages and brings it back on the bumper.
 - **Image model (optional, `requirements-ml.txt`, ~5 GB, uses the GPU a little):** a
   whole-picture check once a second - does this look like the broadcast or like a commercial?
   It may *stop* the ad screen from coming up when graphics are missing (studio show, bumper,
-  the first minutes) and, after 20 s, bring the picture back; it can never hide anything, and
-  once you have said "AD" only the real graphics or you end that break. Its weakness is ads
-  that look like football - those leak. Switch: "Use the image model" / `--no-scene`.
+  the first minutes) and bring the picture back: after 20 s of "looks like the broadcast", or,
+  right after a cut to black (the splice that ends a break), after 2 s of it. It can never hide
+  anything, and once you have said "AD" only the real graphics or you end that break. Its
+  weakness is ads that look like football - those leak, and one right after a cut to black can
+  show for a few seconds before it is hidden again. Switch: "Use the image model" / `--no-scene`.
 - If it can't see the stream (other tab, minimized, a window size it hasn't learned yet) it
   shows the game rather than guess. Leaving or entering fullscreen makes it learn again for that
   window size, which takes another minute or two of game picture.
@@ -70,8 +77,9 @@ How it behaves:
   pass `--game utah`.
 - The ad screen steps aside when another app's window is actually *in front of* the stream, and
   returns when Chrome is back on top. Clicking something on the other monitor doesn't move it.
-- The stream's Chrome window is recognised by **"YouTube TV" in its title** (`--title`). While
-  that window shows another tab, nothing is analysed or recorded.
+- The stream's Chrome window is recognised by **"YouTube TV" or "Fubo" in its title** (`--title`,
+  alternatives separated by `|`). While that window shows another tab, nothing is analysed or
+  recorded. Switching services or channels needs no restart; the graphics are learned afresh.
 - Settings can live in `config.toml` (copy `config.example.toml`); the command line wins.
   `.\run.cmd --help` lists everything. The app's log is `logs\app.log`.
 - If Chrome ever stays silent after a crash or a killed process, run

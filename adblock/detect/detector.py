@@ -121,6 +121,7 @@ class Observation:
     scene: bool | None = None  # the image model's opinion that went into this decision
     video_rect: Rect | None = None  # where the video is inside the captured frame
     learned: bool = False  # the graphics library changed on this frame
+    black: bool = False  # a cut to black (the splice between two things: ads, or an ad and the broadcast)
 
     @property
     def best(self) -> float:
@@ -172,16 +173,18 @@ class Detector:
             self._last_t = t
             return Observation(t, self.fusion.update(None, t), None, self.fusion.override)
 
-    def process(self, image: np.ndarray, t: float, fullscreen: bool | None = None, scene: bool | None = None) -> Observation:
+    def process(self, image: np.ndarray, t: float, fullscreen: bool | None = None, scene: bool | None = None,
+                quick: bool | None = None) -> Observation:
         with self._lock:
-            return self._process(image, t, fullscreen, scene)
+            return self._process(image, t, fullscreen, scene, quick)
 
-    def _process(self, image: np.ndarray, t: float, fullscreen: bool | None, scene: bool | None) -> Observation:
+    def _process(self, image: np.ndarray, t: float, fullscreen: bool | None, scene: bool | None, quick: bool | None) -> Observation:
         elapsed, self._last_t = min(1.0, max(0.0, t - self._last_t)), t
         rect = self.area.locate(image, t, fullscreen)
         if rect is None:
             return Observation(t, self.fusion.update(None, t, scene=scene), None, self.fusion.override, scene=scene)
         gray = scorebug.analysis_gray(image, rect)
+        black = is_black(gray)
         edges = scorebug.edge_map(gray)
         key = (image.shape[1], image.shape[0], rect, edges.shape)
         learner = self._learners.setdefault(key, scorebug.MaskLearner(edges.shape))
@@ -210,7 +213,7 @@ class Detector:
             game_like = False
         else:
             game_like = None
-        state = self.fusion.update(game_like, t, strong, scene)
+        state = self.fusion.update(game_like, t, strong, scene, black, quick)
 
         learner.add(gray, edges, t, self._tag(t))
         learned = False
@@ -218,7 +221,7 @@ class Detector:
             self._last_learn[key] = t
             learned = self._learn(learner, library, t, flat)
         return Observation(t, state, game_like, self.fusion.override, [tr.score for tr in library],
-                           [tr.region.bbox for tr in library], sum(tr.present for tr in library), scene, rect, learned)
+                           [tr.region.bbox for tr in library], sum(tr.present for tr in library), scene, rect, learned, black)
 
     def _tag(self, t: float) -> int:
         """What the viewer's latest correction says about the current frame, if anything."""
@@ -270,6 +273,16 @@ class Detector:
                 x0, y0, x1, y1 = tracked.region.bbox
                 cv2.rectangle(canvas, (x0, y0), (x1, y1), colour, 1)
             return canvas
+
+
+BLACK_MEAN, BLACK_BRIGHT, BLACK_BRIGHT_SHARE = 16.0, 60, 0.005
+
+
+def is_black(gray: np.ndarray) -> bool:
+    """A cut to black: a dark frame with (almost) no bright pixels at all - a night-game shadow
+    is dark on average but full of bright spots. Measured on the recordings: 4 fps catches
+    the splice to black before both ABC returns of 2026-09-26 (2.2 s and 0.7 s of black)."""
+    return float(gray.mean()) < BLACK_MEAN and float((gray > BLACK_BRIGHT).mean()) < BLACK_BRIGHT_SHARE
 
 
 def _ambiguous(learner: scorebug.MaskLearner, region: scorebug.Region) -> bool:
