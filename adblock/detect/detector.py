@@ -41,6 +41,7 @@ FAST_RETURN_S = 180.0  # on-screen time before a region alone may bring the game
 FORGET_YOUNG_AFTER_S = 10 * 60.0  # a region with little on-screen time that hasn't been seen this long goes
 ESTABLISHED_S = 300.0  # on-screen time after which a region is never purged as ambiguous
 AMBIGUOUS = (0.35, 0.75)  # a useful graphic scores ~0.9 or ~0 on the history, rarely in between
+SUSPECT_AFTER_S, SUSPECT_SHARE = 8.0, 0.5  # on screen this long, mostly during "commercial" verdicts = an ad banner
 MAX_AMBIGUOUS_SHARE = 0.15
 AREA_MIN_S, AREA_MIN_FRAMES = 8.0, 24
 
@@ -100,10 +101,18 @@ class TrackedRegion:
     seen_s: float = 0.0  # cumulative seconds it has been on screen since it was learned
     seeded: bool = False  # learned from viewer-tagged frames: has to earn trust (TRUST_AFTER_S)
     proven: bool = False  # remembered from an earlier session: may bring the game back fast from the start
+    ad_seen_s: float = 0.0  # of seen_s, the seconds the image model called the picture a commercial
 
     @property
     def trusted(self) -> bool:
-        return not self.seeded or self.seen_s >= TRUST_AFTER_S
+        return (not self.seeded or self.seen_s >= TRUST_AFTER_S) and not self.suspect
+
+    @property
+    def suspect(self) -> bool:
+        """Mostly on screen while the picture looked like a commercial: an ad's own banner.
+        Live 2026-09-26: a local ad repeating in every break has a static bottom banner; the
+        learner took it for a broadcast graphic and it overruled the viewer's own "AD"."""
+        return self.seen_s >= SUSPECT_AFTER_S and self.ad_seen_s > SUSPECT_SHARE * self.seen_s
 
     @property
     def present(self) -> bool:
@@ -166,7 +175,7 @@ class Detector:
             today = date.today().isoformat()
             return [Remembered(key[1], tr.region, tr.seen_s, today, label)
                     for key, library in self._library.items() if key[0] == FULLSCREEN
-                    for tr in library if tr.seen_s >= FAST_RETURN_S]
+                    for tr in library if tr.seen_s >= FAST_RETURN_S and not tr.suspect]
 
     def unknown(self, t: float) -> Observation:
         """No usable picture right now (window shows another tab, is minimized, no frames)."""
@@ -197,11 +206,14 @@ class Detector:
         library = self._library[key]
 
         flat = edges.reshape(-1)
+        commercial = quick is False or scene is False  # the image model's view of this frame
         for tracked in library:
             tracked.score = tracked.region.score(flat)
             if tracked.present:
                 tracked.seen_s += elapsed
                 tracked.last_seen = t
+                if commercial:
+                    tracked.ad_seen_s += elapsed
         # A graphic on screen vouches for the game as soon as it is trusted. Its absence only
         # means something once it has been around for a while: a segment graphic learned a
         # moment ago (a halftime highlights bug, live 2026-09-19) says nothing when it leaves.
@@ -215,7 +227,10 @@ class Detector:
             game_like = None
         state = self.fusion.update(game_like, t, strong, scene, black, quick)
 
-        learner.add(gray, edges, t, self._tag(t))
+        tag = self._tag(t)
+        if tag == scorebug.TAG_NONE and commercial:
+            tag = scorebug.TAG_AD  # what looks like a commercial teaches no graphics (a repeated ad's banner would)
+        learner.add(gray, edges, t, tag)
         learned = False
         if t - self._last_learn.get(key, float("-inf")) >= RELEARN_EVERY_S:
             self._last_learn[key] = t
@@ -253,7 +268,8 @@ class Detector:
         # purged (the corner bug must survive a 20-minute halftime whatever it looks like there).
         library[:] = [tr for tr in library
                       if t - tr.last_seen < (FORGET_AFTER_S if tr.seen_s >= FAST_RETURN_S else FORGET_YOUNG_AFTER_S)
-                      and (tr.seen_s >= ESTABLISHED_S or not _ambiguous(learner, tr.region))]
+                      and (tr.seen_s >= ESTABLISHED_S or not _ambiguous(learner, tr.region))
+                      and not tr.suspect]
         after = [tr.region.bbox for tr in library]  # "changed" = a graphic came or went, not a box that wobbled a pixel
         return len(after) != len(before) or any(_overlap(a, b) < 0.8 for a, b in zip(after, before))
 

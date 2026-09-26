@@ -171,8 +171,8 @@ class Fusion:
         if self.override is not None:
             if self.override == GAME:
                 agrees = present_for >= s.agree_game_s or (drives and quick_ok_for >= s.agree_game_s)
-            else:
-                agrees = absent_for >= s.agree_ad_s or (drives and quick_ad_for >= s.agree_ad_s)
+            else:  # the model's agreement counts only while no graphic is up: one on screen would undo the AD at once
+                agrees = absent_for >= s.agree_ad_s or (drives and quick_ad_for >= s.agree_ad_s and not game_like)
             if not agrees:
                 return self.state
             self.override = None  # evidence caught up with the viewer: back to automatic

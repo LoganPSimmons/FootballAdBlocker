@@ -49,6 +49,42 @@ class Broadcast:
         return {state for t, state in self.log if start <= t < end}
 
 
+def banner(image):
+    """A commercial's static bottom banner: logo, phone number, web address."""
+    cv2.rectangle(image, (0, 330), (640, 360), (30, 30, 200), -1)
+    cv2.putText(image, "RHP  775.322.9434  rhpinc.net", (60, 352), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+
+class RepeatedAdBanner(unittest.TestCase):
+    def test_what_the_model_calls_a_commercial_teaches_no_graphic(self):
+        """Live 2026-09-26: a local ad in every break has a static banner; learned as a graphic it
+        forced the picture back mid-ad and undid the viewer's own AD."""
+        detector = Detector()
+        t = 0.0
+        for _ in range(int(240 * FPS)):  # four minutes of ads, the banner on screen throughout
+            frame = texture()
+            banner(frame)
+            seen = detector.process(frame, t, fullscreen=True, scene=False, quick=False)
+            t += 1 / FPS
+        self.assertIsNone(seen.game_like, "nothing learned from commercials: no graphic vouches")
+
+    def test_a_graphic_seen_mostly_during_commercials_stops_vouching(self):
+        detector = Detector()
+        t = 0.0
+        for _ in range(int(120 * FPS)):  # learned as a graphic on the broadcast (the model undecided)
+            frame = texture()
+            banner(frame)
+            seen = detector.process(frame, t, fullscreen=True)
+            t += 1 / FPS
+        self.assertTrue(seen.game_like)
+        for _ in range(int(150 * FPS)):  # then it keeps appearing in commercials
+            frame = texture()
+            banner(frame)
+            seen = detector.process(frame, t, fullscreen=True, scene=False, quick=False)
+            t += 1 / FPS
+        self.assertIsNot(seen.game_like, True, "an ad banner does not vouch for the game")
+
+
 class FullscreenPixelSlack(unittest.TestCase):
     def test_a_one_pixel_change_of_the_fullscreen_window_keeps_the_library(self):
         """Live 2026-09-26 (Fubo): the fullscreen window was reported 1920x1079 for a while; the
