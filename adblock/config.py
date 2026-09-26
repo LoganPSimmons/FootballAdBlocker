@@ -21,6 +21,8 @@ class Config:
     pip: bool = True  # small live thumbnail on the overlay, to see when the game is back
     auto: bool = True  # the detector drives GAME/AD; off = it only watches (shadow mode) and you toggle
     scene: bool = True  # also use the image model (needs requirements-ml.txt; ignored if not installed)
+    scene_drives: bool = True  # the image model drives GAME/AD; learned graphics only block hiding and speed returns.
+    #                            False: the graphics rules drive and the model vetoes / returns (the 2026-09-19 behaviour)
     enter_ad_s: float = 5.0  # broadcast graphics missing this long -> AD (higher = safer for live play)
     exit_ad_frames: int = 3  # consecutive frames with graphics back -> GAME (~0.75 s at 4 fps)
     close_to_tray: bool = False  # False: closing the control window quits the app. True: it keeps running in the tray

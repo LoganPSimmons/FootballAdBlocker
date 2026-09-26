@@ -99,6 +99,7 @@ class TrackedRegion:
     score: float = 0.0
     seen_s: float = 0.0  # cumulative seconds it has been on screen since it was learned
     seeded: bool = False  # learned from viewer-tagged frames: has to earn trust (TRUST_AFTER_S)
+    proven: bool = False  # remembered from an earlier session: may bring the game back fast from the start
 
     @property
     def trusted(self) -> bool:
@@ -191,7 +192,7 @@ class Detector:
         if key not in self._library:
             # A warm start: remembered graphics join the library with no on-screen time, so
             # they can vouch for the game at once but their absence means nothing yet.
-            self._library[key] = [TrackedRegion(item.region, t) for item in self.remembered
+            self._library[key] = [TrackedRegion(item.region, t, proven=True) for item in self.remembered
                                   if key[0] == FULLSCREEN and item.shape == edges.shape]
         library = self._library[key]
 
@@ -205,7 +206,7 @@ class Detector:
         # means something once it has been around for a while: a segment graphic learned a
         # moment ago (a halftime highlights bug, live 2026-09-19) says nothing when it leaves.
         on_screen = [tr for tr in library if tr.trusted and tr.present]
-        strong = any(tr.seen_s >= FAST_RETURN_S for tr in on_screen)
+        strong = any(tr.seen_s >= FAST_RETURN_S or tr.proven for tr in on_screen)  # live 2026-09-26: 4 s returns after every launch
         if on_screen:
             game_like = True
         elif any(tr.trusted and tr.seen_s >= MISSABLE_S for tr in library):

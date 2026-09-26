@@ -89,6 +89,44 @@ class Flapping(unittest.TestCase):
             line.feed(False, 120)
 
 
+class ImageModelDrives(unittest.TestCase):
+    """The viewer's choice (2026-09-26): the model's quick verdict drives, graphics only guard."""
+
+    def feed(self, line, game_like, quick, seconds, **kwargs):
+        for _ in range(int(seconds * FPS)):
+            line.states.append(line.fusion.update(game_like, line.t, quick=quick, **kwargs))
+            line.t += 1 / FPS
+        return line.states[-1]
+
+    def test_commercial_hides_and_broadcast_shows_without_any_graphic(self):
+        line = Timeline(scene_drives=True, drive_enter_s=4.0, drive_exit_s=3.0)
+        self.assertEqual(self.feed(line, None, True, 30), GAME)
+        self.assertEqual(self.feed(line, None, False, 3.5), GAME, "not before 4 s of 'commercial'")
+        self.assertEqual(self.feed(line, None, False, 1.0), AD)
+        self.assertEqual(self.feed(line, None, True, 2.5), AD, "not before 3 s of 'broadcast'")
+        self.assertEqual(self.feed(line, None, True, 1.0), GAME)
+
+    def test_a_graphic_on_screen_blocks_hiding_and_brings_the_picture_back_at_once(self):
+        line = Timeline(scene_drives=True)
+        self.assertEqual(self.feed(line, True, False, 60), GAME, "the scorebug is up: the model cannot hide")
+        self.assertEqual(self.feed(line, False, False, 5), AD)
+        self.assertEqual(self.feed(line, True, False, 1.0), GAME, "graphics back: shown although the model still says ad")
+
+    def test_after_a_viewers_ad_the_model_needs_the_long_rule(self):
+        line = Timeline(scene_drives=True, drive_exit_s=3.0, scene_exit_s=12.0)
+        self.feed(line, True, True, 30)
+        line.fusion.correct(AD)
+        self.feed(line, False, False, 5)
+        self.assertEqual(self.feed(line, False, True, 11), AD, "a football-looking ad the viewer hid stays hidden")
+        self.assertEqual(self.feed(line, False, True, 2), GAME)
+
+    def test_without_an_opinion_the_graphics_rules_take_over(self):
+        line = Timeline(scene_drives=True)
+        self.feed(line, True, None, 30)
+        self.assertEqual(self.feed(line, False, None, 5.5), AD, "model silent: graphics absent 5 s hides as before")
+        self.assertEqual(self.feed(line, True, None, 1.0), GAME)
+
+
 class ImageModel(unittest.TestCase):
     """The scene opinion may veto hiding and slowly bring the picture back - nothing else."""
 

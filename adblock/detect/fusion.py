@@ -46,6 +46,14 @@ is calling football-looking ads the broadcast:
   holds         viewer holds listen to graphics only; after the viewer has said "AD", only
                 graphics, a splice to black, or the viewer end that break
 
+``scene_drives`` (the viewer's choice after a day of watching both, 2026-09-26: "just use the
+image model, it performs better"): the model's quick verdict drives the state - "commercial"
+for ``drive_enter_s`` hides, "broadcast" for ``drive_exit_s`` shows - and the graphics keep
+only the two powers that can never hide play: a trusted graphic on screen blocks hiding, and one
+coming back shows the picture at once. A viewer's "AD" then needs graphics, a splice to black or
+``scene_exit_s`` of broadcast to end; holds release on the model's agreement too. Whenever the
+model has no opinion (loading, switched off, inside its margin) the rules above take over.
+
 A viewer correction ("that's an ad" / "that's the game") wins immediately and is *held until
 the evidence agrees with it*; from then on the machine carries on by itself. So a correction
 made a few seconds early or late needs no second click. "Agrees" is deliberately lopsided:
@@ -70,6 +78,9 @@ class FusionSettings:
     weak_exit_s: float = 4.0  # how long a not-yet-established graphic must stay to bring the game back
     scene_exit_s: float = 12.0  # how long the image model must keep saying "broadcast" to end an AD by itself
     scene_enter_s: float = 10.0  # ...and "commercial", with no graphic on screen, to start one (inf: never)
+    scene_drives: bool = False  # the image model drives GAME/AD (viewer's choice 2026-09-26); graphics only guard
+    drive_enter_s: float = 4.0  # ...its quick verdict "commercial" this long, with no graphic on screen, hides
+    drive_exit_s: float = 3.0  # ...and "broadcast" this long shows (after a viewer's "AD": scene_exit_s)
     boundary_window_s: float = 15.0  # a cut to black this recent = a splice: the quick verdict may end the AD...
     boundary_exit_s: float = 2.0  # ...once it has said "broadcast" for this long since the black frame
     unknown_grace_s: float = 3.0
@@ -93,8 +104,9 @@ class Fusion:
         self._unknown_since: float | None = None
         self._scene_since: float | None = None  # since when the image model has kept saying "broadcast"
         self._scene_ad_since: float | None = None  # ...or "commercial"
-        self._scene_ad_last: float | None = None  # when it last said "commercial"
+        self._scene_ad_last: float | None = None  # when either verdict last said "commercial"
         self._quick_since: float | None = None  # same for its quick (three-second) verdict
+        self._quick_ad_since: float | None = None  # ...and for the quick verdict saying "commercial"
         self._scene_may_return = True  # False from a viewer's "AD" until graphics are next seen
         self._black_at: float | None = None  # the last cut to black
         self._boundary_until: float = float("-inf")  # a cut to black inside a break opens the quick path until then
@@ -127,9 +139,13 @@ class Fusion:
         scene_for = t - self._scene_since if self._scene_since is not None else 0.0
         self._scene_ad_since = (t if self._scene_ad_since is None else self._scene_ad_since) if scene is False else None
         scene_ad_for = t - self._scene_ad_since if self._scene_ad_since is not None else 0.0
-        if scene is False:
+        if scene is False or quick is False:
             self._scene_ad_last = t
         self._quick_since = (t if self._quick_since is None else self._quick_since) if quick else None
+        self._quick_ad_since = (t if self._quick_ad_since is None else self._quick_ad_since) if quick is False else None
+        quick_ok_for = t - self._quick_since if self._quick_since is not None else 0.0
+        quick_ad_for = t - self._quick_ad_since if self._quick_ad_since is not None else 0.0
+        drives = s.scene_drives and quick is not None  # the model drives only while it has an opinion
         boundary = t <= self._boundary_until
         quick_for = t - max(self._quick_since, self._black_at) if boundary and self._quick_since is not None else 0.0
         self._strong_run = self._strong_run + 1 if game_like and strong else 0
@@ -153,7 +169,10 @@ class Fusion:
         absent_for = t - self._absent_since if self._absent_since is not None else 0.0
 
         if self.override is not None:
-            agrees = present_for >= s.agree_game_s if self.override == GAME else absent_for >= s.agree_ad_s
+            if self.override == GAME:
+                agrees = present_for >= s.agree_game_s or (drives and quick_ok_for >= s.agree_game_s)
+            else:
+                agrees = absent_for >= s.agree_ad_s or (drives and quick_ad_for >= s.agree_ad_s)
             if not agrees:
                 return self.state
             self.override = None  # evidence caught up with the viewer: back to automatic
@@ -163,14 +182,20 @@ class Fusion:
         delay = s.calm_enter_ad_s if flapping else s.enter_ad_s
         graphics_say_ad = absent_for >= delay
         model_says_ad = not game_like and scene_ad_for >= max(s.scene_enter_s, delay)  # nothing vouches for the game
-        if self.state == GAME and not vetoed and (graphics_say_ad or model_says_ad):
+        if drives:
+            hide = not game_like and quick_ad_for >= s.drive_enter_s
+            show = present or quick_for >= s.boundary_exit_s \
+                or quick_ok_for >= (s.drive_exit_s if self._scene_may_return else s.scene_exit_s)
+        else:
+            hide = not vetoed and (graphics_say_ad or model_says_ad)
+            show = present or (self._scene_may_return and scene_for >= s.scene_exit_s) or quick_for >= s.boundary_exit_s
+        if self.state == GAME and hide:
             self.state, self._ad_since = AD, t
-        elif self.state == AD and (present or (self._scene_may_return and scene_for >= s.scene_exit_s)
-                                   or quick_for >= s.boundary_exit_s):
+        elif self.state == AD and show:
             self.state = GAME
-            if not present:  # brought back by the image model: both hiding rules start their clocks afresh
+            if not present:  # brought back by the image model: the hiding rules start their clocks afresh
                 self._absent_since = t
-                self._scene_ad_since = None
+                self._scene_ad_since = self._quick_ad_since = None
         elif (self.state == AD and self._unknown_since is not None
               and t - max(self._unknown_since, float("-inf") if self._scene_ad_last is None else self._scene_ad_last)
               >= s.unknown_grace_s):

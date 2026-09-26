@@ -142,7 +142,8 @@ class Controller(QtCore.QObject):
         self.listener.start_and_wait()  # raises HotkeyError if a combination is taken
 
         remembered = memory.load(MEMORY_FILE)
-        self.detector = Detector(FusionSettings(enter_ad_s=config.enter_ad_s, exit_ad_frames=config.exit_ad_frames), remembered)
+        self.detector = Detector(FusionSettings(enter_ad_s=config.enter_ad_s, exit_ad_frames=config.exit_ad_frames,
+                                                scene_drives=config.scene_drives), remembered)
         self.last_remember = time.perf_counter()
         self.use_scene = config.scene
         self.scene: scene_module.SceneWatcher | None = None
@@ -453,6 +454,8 @@ def parse_args(argv: list[str]) -> tuple[config_module.Config, argparse.Namespac
     parser.add_argument("--no-record", dest="record", action="store_false", default=None)
     parser.add_argument("--no-pip", dest="pip", action="store_false", default=None)
     parser.add_argument("--no-scene", dest="scene", action="store_false", default=None, help="graphics only, no image model")
+    parser.add_argument("--fused", dest="scene_drives", action="store_false", default=None,
+                        help="the graphics rules drive and the image model only vetoes and returns (default: the model drives)")
     parser.add_argument("--headless", action="store_true", help="no control window or tray icon: hotkeys only")
     parser.add_argument("--duration", type=float, help="quit by itself after this many seconds (for testing)")
     args = parser.parse_args(argv)
