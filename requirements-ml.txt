@@ -1,6 +1,12 @@
-# Football Ad Blocker - optional, heavy: the whole-image scene classifier (PLAN.md Phase 5).
-# Not needed to run the app as it is; ~5 GB in the venv.
+# Football Ad Blocker - optional but strongly recommended, and heavy (~5 GB in the venv): the image model
+# (CLIP, zero-shot) that tells the broadcast from a commercial. With it installed it drives the detection and
+# the learned graphics only guard it; without it the app runs on the learned graphics alone.
 # Install:  .\.venv\Scripts\python.exe -m pip install -r requirements-ml.txt
+#
+# The pin below is the CUDA 12.6 build the app was developed with (NVIDIA RTX 3060 Ti). For another GPU, driver
+# or a machine without an NVIDIA card, pick a build at https://pytorch.org/get-started/locally/ and install torch
+# first; the model runs on whatever torch finds ("Image model ready on cuda" or "on cpu" in logs\app.log).
+# On the CPU one frame takes a fraction of a second, which the once-a-second check can live with.
 --extra-index-url https://download.pytorch.org/whl/cu126
-torch==2.14.0+cu126      # CUDA 12.6 build; RTX 3060 Ti, driver 610.60
+torch==2.14.0+cu126
 open_clip_torch

@@ -1,7 +1,6 @@
-# Football Ad Blocker - Phase 0/1 dependencies (Python 3.11, Windows 11).
+# Football Ad Blocker - dependencies (Python 3.11, Windows 11). The image model's packages are in requirements-ml.txt.
 # Install:  .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-# Pinned to the versions the Phase 0 spikes passed with on 2026-09-19.
-# Later phases add: torch, open_clip_torch, onnxruntime-gpu (Phase 5) - deliberately not installed yet.
+# Pinned to the versions the feasibility checks (tools/spike_*.py) passed with on 2026-09-19.
 
 # Capture
 windows-capture==2.0.1   # Windows Graphics Capture of the Chrome window (primary path)
