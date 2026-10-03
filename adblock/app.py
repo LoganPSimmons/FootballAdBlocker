@@ -143,7 +143,7 @@ class Controller(QtCore.QObject):
 
         remembered = memory.load(MEMORY_FILE)
         self.detector = Detector(FusionSettings(enter_ad_s=config.enter_ad_s, exit_ad_frames=config.exit_ad_frames,
-                                                scene_drives=config.scene_drives), remembered)
+                                                scene_drives=config.scene_drives), remembered, use_graphics=config.graphics)
         self.last_remember = time.perf_counter()
         self.use_scene = config.scene
         self.scene: scene_module.SceneWatcher | None = None
@@ -152,6 +152,8 @@ class Controller(QtCore.QObject):
             self.scene.start()  # loads the model in the background; verdicts start a few seconds later
         elif config.scene:
             say("Image model not installed (requirements-ml.txt): running on graphics only.")
+        self.apply_graphics()
+        say(self.describe_mode())
         if remembered:
             say(f"Remembering {len(remembered)} graphic(s) from earlier sessions: no warm-up for a broadcast seen before.")
         self.observed.connect(self.on_observation)
@@ -167,6 +169,7 @@ class Controller(QtCore.QObject):
             self.writer.start(app_version=__version__, hotkey=config.hotkey, title_contains=config.title_contains,
                               game_query=config.game, stream_delay_s=config.stream_delay_s, capture="wgc-window",
                               auto=config.auto, enter_ad_s=config.enter_ad_s, exit_ad_frames=config.exit_ad_frames,
+                              graphics=config.graphics, scene=self.model_in_use(), scene_drives=config.scene_drives,
                               overlay_capture_excluded=self.overlay.capture_excluded)
         if config.game:
             self.set_game(config.game)
@@ -244,11 +247,31 @@ class Controller(QtCore.QObject):
     def quick_opinion(self) -> bool | None:
         return self.scene.fast_verdict() if self.scene and self.use_scene else None
 
-    def set_scene(self, enabled: bool) -> None:
-        if enabled != self.use_scene:
-            self.use_scene = enabled
-            self.log("scene", enabled=enabled)
-            say(f"Image model {'on' if enabled else 'off'}")
+    def model_in_use(self) -> bool:
+        """The image model is installed, switched on and has not failed to load (it may still be loading)."""
+        return self.scene is not None and self.use_scene and not self.scene.failed
+
+    def set_graphics(self, enabled: bool) -> None:
+        """"Use learned graphics" in the control window: off, the image model decides alone."""
+        if enabled != self.config.graphics:
+            self.config.graphics = enabled
+            self.apply_graphics()
+            self.log("graphics", enabled=enabled)
+            say("Learned graphics " + ("guard the image model again" if enabled else "switched off: the image model decides alone"))
+
+    def apply_graphics(self) -> None:
+        """Without an image model the graphics are the only detector, whatever the setting says."""
+        self.detector.set_graphics(self.config.graphics or not self.model_in_use())
+
+    def describe_mode(self) -> str:
+        """What decides GAME/AD in this run - for the log, so a session can be read back later."""
+        if not self.model_in_use():
+            return "No image model: the learned graphics drive (5 s without one hides, one coming back shows)."
+        if not self.config.scene_drives:
+            return "--fused: the learned graphics drive; the image model vetoes hiding and brings the picture back."
+        if not self.config.graphics:
+            return "The image model drives alone; the learned graphics are tracked but not consulted."
+        return "The image model drives; the learned graphics guard it (on screen: nothing hidden; back: picture at once)."
 
     def set_pip(self, enabled: bool) -> None:
         self.config.pip = enabled
@@ -383,21 +406,30 @@ class Controller(QtCore.QObject):
         seen = self.observation
         if self.stream is None:
             return f"Waiting for a Chrome window with '{self.config.title_contains}' in its title."
-        if seen is not None and seen.override == AD and not seen.scores:
+        model = self.model_in_use()
+        if seen is not None and seen.override == AD and not model and not seen.scores:
             return ("You said AD. I haven't learned this broadcast's graphics yet, so I can't tell when the game "
                     "is back: click \"That's the GAME\" when it is.")
         if seen is not None and seen.override:
             return f"You said {seen.override}. Holding that until the picture agrees, then automatic again."
-        if seen is None or not seen.scores:
-            return "Learning this broadcast's graphics (takes a minute or two of game picture). Nothing is hidden until then."
-        if seen.game_like is None:
+        if seen is None or seen.video_rect is None:
             return "Can't see the stream right now (other tab, minimized, or a new window size being learned)."
+        mode = "Automatic" if self.auto else "Manual - the detector only watches"
+        if not self.detector.use_graphics:
+            return f"{mode}: the image model decides alone (learned graphics off).{self.scene_status()}"
+        if not seen.scores:
+            until_then = "Until then only the image model can hide." if model else "Nothing is hidden until then."
+            return f"Learning this broadcast's graphics (takes a minute or two of game picture). {until_then}{self.scene_status()}"
         graphics = f"{seen.on_screen} of {len(seen.scores)} learned graphics on screen"
-        return f"{'Automatic' if self.auto else 'Manual - the detector only watches'}: {graphics}.{self.scene_status()}"
+        return f"{mode}: {graphics}.{self.scene_status()}"
 
     def scene_status(self) -> str:
-        if not (self.scene and self.use_scene):
-            return ""
+        if self.scene is None:
+            return " No image model installed (requirements-ml.txt): graphics only."
+        if not self.use_scene:
+            return " Image model switched off (--no-scene): graphics only."
+        if self.scene.failed:
+            return " Image model could not be loaded (see logs\\app.log): graphics only."
         if not self.scene.ready:
             return " Image model: loading."
         opinion = self.scene.verdict()
@@ -413,6 +445,7 @@ class Controller(QtCore.QObject):
     # --- heartbeat --------------------------------------------------------------------------
     def tick(self) -> None:
         now = time.perf_counter()
+        self.apply_graphics()  # the model may have failed to load since the last tick: then the graphics must stay on
         if self.writer and (self.writer.dir / "STOP").exists():  # polite quit request from another process
             self.app.quit()
             return
@@ -461,7 +494,7 @@ class Controller(QtCore.QObject):
             say(f"Session saved: {self.writer.dir}  ({self.writer.frame_count} frames, {self.corrections} corrections)")
 
 
-def parse_args(argv: list[str]) -> tuple[config_module.Config, argparse.Namespace]:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m adblock.app", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", type=Path, help="TOML settings file (default: config.toml if present)")
@@ -477,11 +510,17 @@ def parse_args(argv: list[str]) -> tuple[config_module.Config, argparse.Namespac
     parser.add_argument("--no-record", dest="record", action="store_false", default=None)
     parser.add_argument("--no-pip", dest="pip", action="store_false", default=None)
     parser.add_argument("--no-scene", dest="scene", action="store_false", default=None, help="graphics only, no image model")
+    parser.add_argument("--no-graphics", dest="graphics", action="store_false", default=None,
+                        help="the image model decides alone; the learned graphics are tracked but not consulted")
     parser.add_argument("--fused", dest="scene_drives", action="store_false", default=None,
                         help="the graphics rules drive and the image model only vetoes and returns (default: the model drives)")
     parser.add_argument("--headless", action="store_true", help="no control window or tray icon: hotkeys only")
     parser.add_argument("--duration", type=float, help="quit by itself after this many seconds (for testing)")
-    args = parser.parse_args(argv)
+    return parser
+
+
+def parse_args(argv: list[str]) -> tuple[config_module.Config, argparse.Namespace]:
+    args = build_parser().parse_args(argv)
     config = config_module.load(args.config)
     for name, value in vars(args).items():
         if value is not None and hasattr(config, name):

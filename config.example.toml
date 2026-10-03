@@ -12,5 +12,11 @@ enter_ad_s = 5.0               # graphics missing this long -> ad. Higher = safe
 exit_ad_frames = 3             # frames with the graphics back -> game (~0.75 s)
 close_to_tray = false          # true: closing the control window hides it to the tray instead of quitting
 scene = true                   # use the image model when requirements-ml.txt is installed
+graphics = true                # the learned graphics guard the image model; false = the image model decides alone
+# scene_drives = true          # false: the graphics rules drive and the model only vetoes / returns (--fused)
 record = true
 fps = 4.0
+# label = ""                   # session folder label (default: the game, then "session")
+# frame_width = 640            # recorded frame width in pixels (640 -> 640x360 when the stream is fullscreen)
+# jpeg_quality = 75
+# sessions_dir = "sessions"    # where recordings go; relative to the project folder unless absolute

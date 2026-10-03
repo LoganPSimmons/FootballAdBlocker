@@ -6,9 +6,10 @@ frame on the RTX 3060 Ti, 97-99 % per frame, and - the reason it is here - it se
 logo-less halftime studio show from its commercials, which the graphics detector cannot.
 Its known weakness is ads that look like football.
 
-It is an *optional* part (requirements-ml.txt, ~5 GB). The state machine gives it limited
-powers on purpose (fusion.py): it can veto hiding and, slowly, bring the picture back; it can
-never hide anything by itself.
+It is an *optional* part (requirements-ml.txt, ~5 GB) - and, since the second live day
+(2026-09-26, fusion.py ``scene_drives``), the one that drives the GAME/AD state: "commercial"
+for a few seconds hides, "broadcast" for a few seconds shows, while the learned graphics only
+guard it. Without it the graphics rules drive on their own.
 """
 
 from __future__ import annotations
@@ -105,6 +106,7 @@ class SceneWatcher(threading.Thread):
         self.newest_frame, self.period_s = newest_frame, period_s
         self.scores: deque[float] = deque(maxlen=SMOOTH_S)
         self.ready = False
+        self.failed = False  # could not be loaded (wrong torch build, broken install): the app runs on graphics only
         self._halt = threading.Event()
 
     def verdict(self) -> bool | None:
@@ -124,6 +126,7 @@ class SceneWatcher(threading.Thread):
         try:
             model = SceneModel()  # a few seconds: weights from disk to the GPU
         except Exception:
+            self.failed = True
             log.exception("image model could not be loaded; carrying on with graphics only")
             return
         self.ready = True

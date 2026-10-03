@@ -12,7 +12,9 @@ auto mode are **built and running** (section "Auto mode, as built" below), drive
 window + tray icon; the hotkey is now just one of the ways to correct it. Two live days so far:
 FOX on YouTube TV (2026-09-19) and ABC/ESPN on YouTube TV, then FOX on Fubo (2026-09-26, section
 "Second live day"). What is still ahead: a full hands-off game, the stats dashboard (Phase 2), the
-learned scene classifier (Phase 5) and polish (Phase 6).
+learned scene classifier (Phase 5) and polish (Phase 6). **2026-10-03:** the control window's option is
+now "Use learned graphics" (the image model is used whenever it is installed), measured below, and
+the repo has the docs it needs to be published (README, docs/, LICENSE, CONTRIBUTING).
 
 ## Setup this is designed for
 
@@ -446,6 +448,42 @@ break found, 0 s hidden in the unaided replay with the model). Phase 4's hands-o
 yet: 5 clicks in 34 min, of which 2 were the cold start after a launch, 2 the slow returns fixed
 above, 1 beat the entry delay by a second.
 
+## The control window asks about the graphics, not the model (2026-10-03)
+
+Logan, after a week with the model driving: the image model is the more reliable source, so the
+switch in the control window should be about the *other* signal. "Use the image model" is gone -
+the model is simply used whenever it is installed (`scene = false` / `--no-scene` stay for
+comparison runs) - and **"Use learned graphics"** (`graphics`, `--no-graphics`) takes its place.
+Ticked, the default, the graphics guard the model as before: on screen they block hiding, coming
+back they show the picture at once. Unticked, the model decides alone: the detector keeps
+learning, tracking, drawing and remembering the graphics but tells the state machine nothing about
+them (`game_like` is None on every frame), so the "nothing trusted yet" rules hold for the whole
+game - the mode every launch starts in anyway. Without the model the box is locked on, the
+graphics being the only detector then; a model that fails to load (`SceneWatcher.failed`) locks it
+too. The status line and the start-up log say which signal drives.
+
+Measured unaided on the eight labelled sessions (3.5 h, 56 min of ads), the model driving; the
+patched default replays identically to the previous build:
+
+| | broadcast hidden | of it, the two sessions with the known label-noise stretches (utah-auto_3, _4; identical in both runs) | ads leaked | transitions |
+| --- | --- | --- | --- | --- |
+| graphics guard the model (default) | 169.1 s | 145.6 s | 564.5 s of 3355 s (83 %) | 72 |
+| model alone | 188.0 s | 145.6 s | 574.2 s (83 %) | 74 |
+
+The guard rails are worth about 19 s of broadcast over 3.5 h, nearly all of it on returns: a
+graphic coming back shows the picture within a second, the model needs 3 s of "broadcast" plus its
+lag, so every return without the graphics lands 3-6 s later (session_2, utah-auto_5, utah-auto_6).
+Once they blocked a false hide outright (utah-auto_6, 10:21: 4.8 s hidden with a graphic up while
+the model called the picture a commercial). The model alone also leaked 10 s more (one break in
+utah-auto_2 entered 5 s later and reopened for 5 s). So the default stays on; the box is for
+watching the two signals against each other on a network the graphics do badly on.
+
+Also today: the docs a published repo needs - README for a general reader, docs/ (how it works,
+configuration, troubleshooting, development), CONTRIBUTING, an MIT LICENSE, a test that fails when
+a setting or flag is missing from the docs, and tools/preview_control_window.py to render the
+control window without the app running (the real one cannot be launched twice, and the ad screen
+cannot be screenshotted at all).
+
 ## Phases
 
 Each phase ends with something usable on a real game day.
@@ -581,7 +619,7 @@ needs distributing.
 
 ```
 FootballAdBlocker/
-  PLAN.md  README.md  start_ui.cmd  run.cmd  requirements.txt  config.example.toml
+  PLAN.md  README.md  LICENSE  CONTRIBUTING.md  docs/  start_ui.cmd  run.cmd  requirements.txt  config.example.toml
   adblock/
     app.py              the engine: capture, detector thread, state (GAME/AD), corrections, overlay rules
     ui.py               control window + tray icon
@@ -590,15 +628,16 @@ FootballAdBlocker/
     hotkeys.py          RegisterHotKey listener          config.py   defaults < config.toml < CLI
     win32.py            ctypes helpers: find the stream window, rects, z-order, capture exclusion
     detect/             scorebug.py (graphics learner + matcher) · fusion.py (state machine + corrections)
-                        · detector.py (pipeline, video area, graphics library) · later: scene.py · audio.py
+                        · detector.py (pipeline, video area, graphics library) · scene.py (the image model)
+                        · memory.py (graphics remembered between sessions)
     actuators/          audio_mute.py · overlay.py (the ad screen: timer, score, thumbnail + the stats panels)
     stats_widgets.py    win-odds chart, team comparison, one team's panel, scoring / plays text (Phase 2)
     data/espn.py        scoreboard lookup, score + stats pollers, spoiler delay (snapshots + per-play wallclock)
-  dashboard/            (empty: Phase 2 was built as Qt widgets, see stats_widgets.py)
-  tools/                evaluate.py · session_info.py · smoke_app.py · preview_overlay.py · unmute_chrome.py
-                        · spike_*.py (Phase 0) · later: label_review.py
+  tools/                evaluate.py · session_info.py · smoke_app.py · explore_classifier.py · explore_features.py
+                        · preview_control_window.py · preview_overlay.py · preview_stats.py · install_shortcuts.py
+                        · make_icon.py · unmute_chrome.py · spike_*.py (Phase 0)
   sessions/             recorded games (git-ignored)      spike_out/   spike evidence (git-ignored)
-  tests/                unittest: fusion, detector (synthetic broadcast), hotkeys, session round-trip, ESPN
+  tests/                unittest: fusion, detector (synthetic broadcast), labels, memory, hotkeys, session round-trip, ESPN, docs
 ```
 
 ## Defaults chosen (change any of these)

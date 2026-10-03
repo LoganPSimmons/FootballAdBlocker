@@ -12,6 +12,8 @@ to restrict a named session to its usable range.
 Usage:  python tools\\evaluate.py                                   (all trustworthy sessions)
         python tools\\evaluate.py sessions\\2026-09-19_utah-hands-on --from 730 --sheet
         python tools\\evaluate.py --enter-ad 4 --exit-frames 2      (try other state-machine settings)
+        python tools\\evaluate.py --scene --drive                   (the app's default: the image model drives)
+        python tools\\evaluate.py --scene --drive --no-graphics     ("Use learned graphics" unticked)
 """
 
 from __future__ import annotations
@@ -71,7 +73,7 @@ def scene_scores(session: Path) -> list[tuple[float, float]]:
 
 
 def replay(session: Path, settings: FusionSettings, with_corrections: bool = False, raw_labels: bool = False,
-           scene: bool = False) -> list[dict]:
+           scene: bool = False, graphics: bool = True) -> list[dict]:
     """One dict per recorded frame: t, label, detector state, evidence.
 
     Unaided by default - what the detector does on its own. ``with_corrections`` also replays
@@ -89,7 +91,7 @@ def replay(session: Path, settings: FusionSettings, with_corrections: bool = Fal
                 current = value
         return current
 
-    detector = Detector(settings)
+    detector = Detector(settings, use_graphics=graphics)
     rows = []
     pending = scene_scores(session) if scene else []
     recent: deque[float] = deque(maxlen=SMOOTH_S)  # causal, like the live SceneWatcher
@@ -142,9 +144,9 @@ def contact_sheet(session: Path, rows: list[dict], moments: list[float], path: P
 
 
 def evaluate(session: Path, settings: FusionSettings, t_from: float, t_to: float, sheet: bool,
-             with_corrections: bool, raw_labels: bool, scene: bool = False) -> dict:
+             with_corrections: bool, raw_labels: bool, scene: bool = False, graphics: bool = True) -> dict:
     started = time.perf_counter()
-    rows = replay(session, settings, with_corrections, raw_labels, scene)
+    rows = replay(session, settings, with_corrections, raw_labels, scene, graphics)
     took = time.perf_counter() - started
     scored = [r for r in rows if t_from <= r["t"] <= t_to]
     steps = np.diff([r["t"] for r in scored], append=scored[-1]["t"]).clip(0, 1.0)  # seconds each frame stands for
@@ -190,6 +192,9 @@ def main() -> int:
     parser.add_argument("--scene-enter", type=float, default=FusionSettings.scene_enter_s,
                         help="seconds of 'commercial' with no graphic on screen that start an AD (default 10; 0 disables)")
     parser.add_argument("--drive", action="store_true", help="the image model drives the state (the app's default); needs --scene")
+    parser.add_argument("--no-graphics", dest="graphics", action="store_false",
+                        help="the image model decides alone, the learned graphics are not consulted (the control window's "
+                             "'Use learned graphics' unticked); needs --scene")
     parser.add_argument("--raw-labels", action="store_true",
                         help="score against the recorded state as is, without applying corrections backwards")
     parser.add_argument("--with-corrections", action="store_true",
@@ -206,8 +211,8 @@ def main() -> int:
         sessions = [p for p in everything if not FileReplaySource(p).unreliable_labels]
         skipped = len(everything) - len(sessions)
         print(f"{len(sessions)} session(s) with trustworthy labels ({skipped} skipped: UNRELIABLE_LABELS.txt)")
-    totals = [evaluate(s, settings, args.t_from, args.t_to, args.sheet, args.with_corrections, args.raw_labels, args.scene)
-              for s in sessions]
+    totals = [evaluate(s, settings, args.t_from, args.t_to, args.sheet, args.with_corrections, args.raw_labels, args.scene,
+                       args.graphics) for s in sessions]
     if len(totals) > 1:
         print(f"\nTOTAL  game-seconds hidden {sum(t['hidden'] for t in totals):.1f} s, "
               f"ad-seconds leaked {sum(t['leaked'] for t in totals):.1f} of {sum(t['label_ad'] for t in totals):.0f} s")

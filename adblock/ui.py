@@ -1,7 +1,7 @@
 """Control window + tray icon.
 
 Closing the window quits the app - every thread, the image model, the hotkeys - and leaves
-Chrome unmuted; that is what a viewer expects of a close button (Logan did). Minimize is the
+Chrome unmuted; that is what a viewer expects of a close button (the first one did). Minimize is the
 way to get the window out of sight while it keeps working. ``close_to_tray = true`` in
 config.toml restores the other behaviour: close hides the window, the tray icon keeps it alive.
 """
@@ -103,7 +103,7 @@ class ControlWindow(QtWidgets.QWidget):
         self.preview.setObjectName("preview")
         self.preview.setFixedSize(PREVIEW_SIZE[0] + 2, PREVIEW_SIZE[1] + 2)
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        legend = QtWidgets.QLabel("What the detector looks for: learned graphics in green when on screen, red when missing.")
+        legend = QtWidgets.QLabel("Learned graphics on the analysed picture: green = on screen, red = missing, grey = not trusted yet.")
         legend.setObjectName("legend")
         legend.setWordWrap(True)
 
@@ -123,16 +123,16 @@ class ControlWindow(QtWidgets.QWidget):
         self.pip = QtWidgets.QCheckBox("Live thumbnail on the ad screen")
         self.pip.setChecked(controller.config.pip)
         self.pip.toggled.connect(controller.set_pip)
-        self.scene = QtWidgets.QCheckBox("Use the image model")
-        self.scene.setToolTip("A whole-picture check that tells a studio show or a replay from a commercial when no "
-                              "learned graphic is on screen. It can stop the ad screen from coming up, never cause it.")
-        self.scene.setChecked(controller.use_scene)
-        self.scene.setEnabled(controller.scene is not None)
-        self.scene.toggled.connect(controller.set_scene)
+        self.graphics = QtWidgets.QCheckBox("Use learned graphics")
+        self.graphics.setToolTip("The broadcast's own graphics (scorebug, network logo), learned while you watch: while one is "
+                                 "on screen nothing is hidden, and when one comes back the picture is back at once. Untick to "
+                                 "let the image model decide alone. Without the image model they are the only detector and stay on.")
+        self.graphics.setChecked(controller.config.graphics)
+        self.graphics.toggled.connect(controller.set_graphics)
         options = QtWidgets.QGridLayout()
         options.addWidget(self.auto, 0, 0)
         options.addWidget(self.pip, 0, 1)
-        options.addWidget(self.scene, 1, 0)
+        options.addWidget(self.graphics, 1, 0)
 
         self.games = QtWidgets.QComboBox()
         self.games.addItem("Score on the ad screen: none", ("", ""))
@@ -244,6 +244,13 @@ class ControlWindow(QtWidgets.QWidget):
         self.say_game.setEnabled(c.state != GAME)
         if self.auto.isChecked() != c.auto:
             self.auto.setChecked(c.auto)
+        model = c.model_in_use()  # without the model the graphics are the only detector: the box is on and locked
+        self.graphics.setEnabled(model)
+        wanted = c.config.graphics if model else True
+        if self.graphics.isChecked() != wanted:
+            self.graphics.blockSignals(True)  # showing the forced state is not the viewer choosing it
+            self.graphics.setChecked(wanted)
+            self.graphics.blockSignals(False)
         where = c.writer.dir.name if c.writer else "not recording"
         frames = c.writer.frame_count if c.writer else 0
         self.session.setText(f"Recording: {where}   ·   {frames} frames   ·   {c.corrections} correction(s)")

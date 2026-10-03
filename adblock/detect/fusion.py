@@ -54,6 +54,12 @@ coming back shows the picture at once. A viewer's "AD" then needs graphics, a sp
 ``scene_exit_s`` of broadcast to end; holds release on the model's agreement too. Whenever the
 model has no opinion (loading, switched off, inside its margin) the rules above take over.
 
+With the learned graphics switched off (detector.py ``use_graphics``, the control window's "Use
+learned graphics") ``game_like`` is None on every frame, so the "nothing trusted yet" rules hold
+for the whole game: the model alone hides and shows, a viewer's hold is confirmed or released by
+the model's agreement alone, and losing its opinion for ``unknown_grace_s`` during a break shows
+the game.
+
 A viewer correction ("that's an ad" / "that's the game") wins immediately and is *held until
 the evidence agrees with it*; from then on the machine carries on by itself. So a correction
 made a few seconds early or late needs no second click. "Agrees" is deliberately lopsided:

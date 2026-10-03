@@ -168,7 +168,7 @@ class Overlay(QtWidgets.QWidget):
         """Show over ``rect`` (physical pixels) without activating. Safe to call repeatedly."""
         left, top, right, bottom = rect
         screen = QtGui.QGuiApplication.screenAt(QtCore.QPoint(left + 1, top + 1)) or QtGui.QGuiApplication.primaryScreen()
-        ratio = screen.devicePixelRatio()  # 1.0 on both of Logan's screens; mixed-DPI setups are untested
+        ratio = screen.devicePixelRatio()  # 1.0 on the development machine's screens; mixed-DPI setups are untested
         geometry = QtCore.QRect(*(round(v / ratio) for v in (left, top, right - left, bottom - top)))
         if geometry.width() != self.target_width:
             self.target_width = geometry.width()

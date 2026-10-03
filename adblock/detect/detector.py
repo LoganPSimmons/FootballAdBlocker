@@ -16,6 +16,11 @@ leaves when it hasn't been seen for 45 minutes. In particular it is *not* droppe
 screen while the viewer says "ad": the halftime studio show carries the network's corner bug,
 viewers reasonably call that a break, and losing the corner bug would bring back false alarms
 on every replay - trading a cheap mistake (an ad leaks) for the expensive one (play hidden).
+
+Switching the graphics off ("Use learned graphics" in the control window, ``use_graphics``)
+keeps all of this running - learning, tracking, the picture in the window, the memory - but
+tells the state machine nothing about them: the evidence is "unknown" throughout and the image
+model decides alone, exactly as it does in the minutes before anything has been learned.
 """
 
 from __future__ import annotations
@@ -139,9 +144,11 @@ class Observation:
 
 
 class Detector:
-    def __init__(self, settings: FusionSettings | None = None, remembered: list[Remembered] | None = None) -> None:
+    def __init__(self, settings: FusionSettings | None = None, remembered: list[Remembered] | None = None,
+                 use_graphics: bool = True) -> None:
         self.fusion = Fusion(settings)
         self.remembered = list(remembered or [])  # graphics proven in earlier sessions (memory.py)
+        self.use_graphics = use_graphics  # False: learned, tracked and drawn, but the state machine hears nothing of them
         self.area = VideoArea()
         self._lock = threading.Lock()  # process() runs on the detector thread, correct() on the UI thread
         self._learners: dict[tuple, scorebug.MaskLearner] = {}
@@ -158,6 +165,12 @@ class Detector:
         with self._lock:
             self.fusion.correct(state)
             self._corrected_at = self._last_t
+
+    def set_graphics(self, enabled: bool) -> None:
+        """"Use learned graphics" in the control window. Off, the image model decides alone."""
+        if enabled != self.use_graphics:
+            with self._lock:
+                self.use_graphics = enabled
 
     def relearn(self) -> None:
         """Forget everything learned (button in the UI, for when the picture geometry or the
@@ -225,6 +238,8 @@ class Detector:
             game_like = False
         else:
             game_like = None
+        if not self.use_graphics:  # the viewer's choice: the model decides alone, as in the minutes before anything is learned
+            game_like, strong = None, False
         state = self.fusion.update(game_like, t, strong, scene, black, quick)
 
         tag = self._tag(t)

@@ -5,7 +5,7 @@ import unittest
 import cv2
 import numpy as np
 
-from adblock.detect.detector import AD, GAME, Detector
+from adblock.detect.detector import AD, GAME, Detector, FusionSettings
 
 FPS = 4
 rng = np.random.default_rng(7)
@@ -30,17 +30,18 @@ def corner_bug(image):
 
 
 class Broadcast:
-    def __init__(self):
-        self.detector = Detector()
+    def __init__(self, detector: Detector | None = None):
+        self.detector = detector or Detector()
         self.t = 0.0
         self.log: list[tuple[float, str]] = []
 
-    def play(self, seconds, *graphics, **kwargs):
+    def play(self, seconds, *graphics, quick=None, scene=None, **kwargs):
+        """``quick`` / ``scene``: the image model's verdicts during these seconds (None: no opinion)."""
         for _ in range(int(seconds * FPS)):
             frame = texture()
             for draw in graphics:
                 draw(frame, **kwargs) if draw is scorebug else draw(frame)
-            seen = self.detector.process(frame, self.t, fullscreen=True)
+            seen = self.detector.process(frame, self.t, fullscreen=True, scene=scene, quick=quick)
             self.log.append((self.t, seen.state))
             self.t += 1 / FPS
         return seen
@@ -214,6 +215,46 @@ class SyntheticBroadcast(unittest.TestCase):
             seen = tv.detector.process(frozen, i / FPS, fullscreen=True)
         self.assertEqual(seen.scores, [])
         self.assertEqual(seen.state, GAME)
+
+
+class LearnedGraphicsOff(unittest.TestCase):
+    """"Use learned graphics" unticked in the control window: the image model decides alone, and the
+    graphics - still learned and drawn - can neither block hiding nor bring the picture back."""
+
+    @staticmethod
+    def broadcast(use_graphics: bool) -> Broadcast:
+        return Broadcast(Detector(FusionSettings(scene_drives=True), use_graphics=use_graphics))
+
+    def test_graphics_on_screen_no_longer_block_the_model(self):
+        for use_graphics, expected in ((True, GAME), (False, AD)):
+            tv = self.broadcast(use_graphics)
+            seen = tv.play(240, scorebug, corner_bug, quick=True)
+            self.assertGreaterEqual(len(seen.scores), 2, "learned either way: the window still shows them")
+            self.assertEqual(seen.game_like, True if use_graphics else None, "the state machine hears of them only when they are on")
+            seen = tv.play(6, scorebug, corner_bug, quick=False)  # the model calls the picture a commercial, graphics still up
+            self.assertEqual(seen.state, expected)
+
+    def test_the_model_alone_hides_and_shows(self):
+        tv = self.broadcast(False)
+        tv.play(240, scorebug, corner_bug, quick=True)
+        self.assertEqual(tv.play(5, quick=False).state, AD, "'commercial' for 4 s hides")
+        self.assertEqual(tv.play(2, scorebug, corner_bug, quick=False).state, AD, "graphics back against an active 'commercial' do not show")
+        self.assertEqual(tv.play(3.5, scorebug, corner_bug, quick=True).state, GAME, "'broadcast' for 3 s does")
+
+    def test_switching_while_running(self):
+        tv = self.broadcast(True)
+        tv.play(300, scorebug, corner_bug, quick=True)
+        self.assertEqual(tv.play(6, scorebug, corner_bug, quick=False).state, GAME, "on: a graphic on screen blocks hiding")
+        tv.detector.set_graphics(False)
+        self.assertEqual(tv.play(5, scorebug, corner_bug, quick=False).state, AD, "off: the model hides despite it")
+        tv.detector.set_graphics(True)
+        self.assertEqual(tv.play(1, scorebug, corner_bug, quick=None).state, GAME, "on again: an established graphic shows the picture at once")
+
+    def test_without_a_model_opinion_nothing_is_ever_hidden(self):
+        tv = self.broadcast(False)
+        tv.play(240, scorebug, corner_bug)
+        tv.play(120)  # a break, but the model has no opinion (not installed, loading): "can't tell" never hides
+        self.assertEqual({state for _, state in tv.log}, {GAME})
 
 
 if __name__ == "__main__":
