@@ -54,7 +54,7 @@ are in [docs/how-it-works.md](docs/how-it-works.md).
 ## Install
 
 ```powershell
-git clone <this repository> FootballAdBlocker
+git clone https://github.com/LoganPSimmons/FootballAdBlocker.git
 cd FootballAdBlocker
 py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
