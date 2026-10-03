@@ -35,6 +35,7 @@ from collections import deque  # noqa: E402
 
 from adblock.detect.detector import Detector, FusionSettings  # noqa: E402
 from adblock.detect.scene import FAST_S, SMOOTH_S, verdict_from  # noqa: E402
+from adblock.paths import DATA  # noqa: E402
 
 
 def clock(seconds: float) -> str:
@@ -61,7 +62,7 @@ _scene_model = None
 def scene_scores(session: Path) -> list[tuple[float, float]]:
     """(t, image-model score) once a second, from the embeddings tools/explore_classifier.py cached."""
     global _scene_model
-    cache = ROOT / "learned" / "embeddings" / f"{session.name}.npz"
+    cache = DATA / "learned" / "embeddings" / f"{session.name}.npz"
     if not cache.exists():
         raise SystemExit(f"no cached embeddings for {session.name}: run tools\explore_classifier.py on it first")
     if _scene_model is None:
@@ -207,7 +208,7 @@ def main() -> int:
 
     sessions = args.sessions
     if not sessions:
-        everything = sorted(p for p in (ROOT / "sessions").glob("*") if (p / "frames.csv").exists())
+        everything = sorted(p for p in (DATA / "sessions").glob("*") if (p / "frames.csv").exists())
         sessions = [p for p in everything if not FileReplaySource(p).unreliable_labels]
         skipped = len(everything) - len(sessions)
         print(f"{len(sessions)} session(s) with trustworthy labels ({skipped} skipped: UNRELIABLE_LABELS.txt)")

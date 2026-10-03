@@ -6,8 +6,9 @@ import tomllib
 from dataclasses import dataclass, fields
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_PATH = ROOT / "config.toml"
+from adblock.paths import DATA, ROOT  # noqa: F401 - ROOT is re-exported: the UI finds assets/ next to the code
+
+DEFAULT_PATH = DATA / "config.toml"  # next to the code from a clone, %LOCALAPPDATA%\FootballAdBlocker when installed
 
 
 @dataclass
@@ -33,12 +34,12 @@ class Config:
     fps: float = 4.0  # recorded frames per second (2-4). ~40 KB per frame: 4 fps is ~1.7 GB per 3.5 h game
     frame_width: int = 640  # 640x360 when the stream is fullscreen 16:9
     jpeg_quality: int = 75
-    sessions_dir: str = "sessions"  # relative to the project root unless absolute
+    sessions_dir: str = "sessions"  # relative to the data folder (adblock/paths.py) unless absolute
 
     @property
     def sessions_path(self) -> Path:
         path = Path(self.sessions_dir)
-        return path if path.is_absolute() else ROOT / path
+        return path if path.is_absolute() else DATA / path
 
 
 def load(path: Path | None = None) -> Config:

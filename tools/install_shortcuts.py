@@ -45,7 +45,8 @@ def folders() -> dict[str, Path]:
 
 def create(path: Path) -> None:
     link = comtypes.client.CreateObject(ShellLink, interface=IShellLinkW)
-    link.SetPath(str(ROOT / ".venv" / "Scripts" / "pythonw.exe"))
+    venv, embedded = ROOT / ".venv" / "Scripts" / "pythonw.exe", ROOT / "python" / "pythonw.exe"
+    link.SetPath(str(venv if venv.exists() else embedded))  # a clone's venv, or an installed copy's own Python
     link.SetArguments("-m adblock.app")
     link.SetWorkingDirectory(str(ROOT))
     link.SetIconLocation(str(ROOT / "assets" / "app.ico"), 0)

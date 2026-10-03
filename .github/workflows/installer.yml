@@ -1,0 +1,40 @@
+# Builds the Windows installer and, on a version tag (v0.1.0 ...), attaches it to the GitHub release.
+# Run it by hand from the Actions tab to get the installer as a workflow artifact without a release.
+name: Installer
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    permissions:
+      contents: write  # to attach the installer to the release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Inno Setup (preinstalled on the Windows runners; installed if it ever goes missing)
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and -not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y --no-progress
+          }
+
+      - name: Build the installer
+        shell: pwsh
+        run: .\installer\build.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FootballAdBlocker-Setup
+          path: dist/FootballAdBlocker-Setup-*.exe
+          if-no-files-found: error
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/FootballAdBlocker-Setup-*.exe
+          generate_release_notes: true

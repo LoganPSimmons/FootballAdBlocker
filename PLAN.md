@@ -596,8 +596,10 @@ entries on graphics/replays, halftime handled. Re-run the evaluator to prove eac
 
 **Phase 6 — Polish.** Auto game identification, auto stream-delay estimate (scorebug clock
 OCR ↔ play-by-play), audio fade instead of hard mute, ~~tray icon~~ (done with the control
-window) + a settings page, start with Chrome, upset / close-game alerts, optional multiview
-support. Candidates found along the way: carry learned graphics across a fullscreen toggle
+window) + a settings page, ~~a downloadable installer~~ (2026-10-03: `installer/` - an embedded
+Python with the app, the image model an optional component pip-installed at setup time, built by
+GitHub Actions on each version tag; data moves to %LOCALAPPDATA% when installed, `adblock/paths.py`),
+start with Chrome, upset / close-game alerts, optional multiview support. Candidates found along the way: carry learned graphics across a fullscreen toggle
 (register the mask in the new geometry instead of re-learning), warm-start from the last
 session's graphics for the same network, use ESPN's "Halftime" status as a prior.
 

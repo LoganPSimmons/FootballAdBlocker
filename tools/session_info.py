@@ -23,6 +23,7 @@ import cv2  # noqa: E402
 import numpy as np  # noqa: E402
 
 from adblock.capture import FileReplaySource  # noqa: E402
+from adblock.paths import DATA  # noqa: E402
 
 
 def clock(seconds: float) -> str:
@@ -37,7 +38,7 @@ def main() -> int:
 
     session = args.session
     if session is None:
-        folders = sorted((p for p in (ROOT / "sessions").glob("*") if (p / "frames.csv").exists()), key=lambda p: p.stat().st_mtime)
+        folders = sorted((p for p in (DATA / "sessions").glob("*") if (p / "frames.csv").exists()), key=lambda p: p.stat().st_mtime)
         if not folders:
             print("no sessions recorded yet")
             return 1

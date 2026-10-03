@@ -11,6 +11,7 @@ adblock/
   labels.py           per-frame labels from a recording, with corrections applied backwards
   hotkeys.py          RegisterHotKey listener          config.py   defaults < config.toml < command line
   win32.py            ctypes helpers: find the stream window, rects, z-order, capture exclusion
+  paths.py            ROOT (the code) and DATA (what the app writes: the project folder, or %LOCALAPPDATA%\FootballAdBlocker when installed)
   detect/             scorebug.py (graphics learner + matcher) · fusion.py (state machine + corrections)
                       · detector.py (pipeline, video area, graphics library) · scene.py (the image model)
                       · memory.py (graphics remembered between sessions)
@@ -21,6 +22,7 @@ tools/                evaluate.py · session_info.py · smoke_app.py · explore_
                       · preview_control_window.py · preview_overlay.py · preview_stats.py · install_shortcuts.py
                       · make_icon.py · unmute_chrome.py · spike_*.py (the feasibility checks)
 tests/                unittest: fusion, detector (synthetic broadcast), labels, memory, recorder, ESPN, hotkeys, docs
+installer/            build.ps1 (stages an embedded Python + the app, tests it, compiles the setup) · FootballAdBlocker.iss · payload/
 docs/                 these pages          sessions/   recordings (git-ignored)      learned/   memory + embedding cache (git-ignored)
 ```
 
@@ -172,6 +174,35 @@ changes and something stops working; their results on the development PC are in
 - **Timings and thresholds**: `FusionSettings` in `fusion.py` and the constants at the top of
   `detector.py` and `scorebug.py`. Each has a comment saying which recorded moment set it. Change
   one, replay every session, read the contact sheets; then commit the number with its reason.
+
+## Building the installer
+
+`installer\build.ps1` makes the downloadable setup program, the same way on a PC and on GitHub
+Actions (`.github/workflows/installer.yml` runs it on every `v*` tag and attaches the result to the
+release; run it from the Actions tab for an installer without a release):
+
+1. downloads the official Python 3.11 embeddable package (pinned version and SHA-256) into
+   `build\stage\python`, bootstraps pip into it and installs `installer\requirements-installer.txt`
+   (the app's pins, with the lighter PySide6-Essentials and opencv-python-headless builds);
+2. copies the app (`adblock\`, `assets\`, `tools\`, `tests\`, `docs\`, the launchers and text files)
+   next to it, plus `installer\payload\`: `INSTALLED`, the marker that sends everything the app
+   writes to `%LOCALAPPDATA%\FootballAdBlocker` (`adblock\paths.py`), and `install_image_model.cmd`;
+3. runs the unit tests with the staged Python, so what ships is what passed;
+4. compiles `installer\FootballAdBlocker.iss` with Inno Setup 6 into
+   `dist\FootballAdBlocker-Setup-<version>.exe`; the version is `adblock.__version__`.
+
+```powershell
+.\installer\build.ps1              # everything; step 4 needs Inno Setup 6 (winget install JRSoftware.InnoSetup)
+.\installer\build.ps1 -SkipInno    # stage and test only: build\stage is a runnable copy
+```
+
+The setup program installs under `%LOCALAPPDATA%\Programs\Football Ad Blocker` (per user, no
+administrator rights, nothing in the registry but the uninstaller) and offers the image model as a
+component: that runs `install_image_model.cmd`, which pip-installs `requirements-ml.txt` into the
+copy's own Python and fetches the weights. Shipping a real Python environment rather than a frozen
+executable is what makes those 5 GB optional - `python\python.exe -m pip` works in the installed
+folder, and so do the tools and the tests. The installer is not code-signed, so SmartScreen warns
+once; a signing certificate would remove that.
 
 ## Where the history is
 

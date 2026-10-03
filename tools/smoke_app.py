@@ -31,6 +31,7 @@ from adblock.actuators import audio_mute
 from adblock.actuators.overlay import WINDOW_TITLE
 from adblock.capture import UNRELIABLE_MARKER, FileReplaySource
 from adblock.hotkeys import parse_hotkey
+from adblock.paths import DATA
 
 KEYEVENTF_KEYUP = 0x2
 win32.user32.WindowFromPoint.restype = wintypes.HWND
@@ -134,7 +135,7 @@ def main() -> int:
     print("\n--- app output ---")
     print(log_path.read_text(encoding="utf-8").rstrip())
 
-    sessions = sorted((ROOT / "sessions").glob("*_smoke*"), key=lambda p: p.stat().st_mtime)
+    sessions = sorted((DATA / "sessions").glob("*_smoke*"), key=lambda p: p.stat().st_mtime)
     if not sessions:
         print("FAIL: no session folder was written")
         return 1

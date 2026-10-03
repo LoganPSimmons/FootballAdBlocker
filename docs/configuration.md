@@ -3,8 +3,8 @@
 Three layers, each overriding the one before:
 
 1. the defaults in `adblock/config.py`,
-2. `config.toml` in the project folder (copy `config.example.toml` and edit; git-ignored), or any file
-   named with `--config`,
+2. `config.toml` in the data folder - the project folder from a clone, `%LOCALAPPDATA%\FootballAdBlocker`
+   for an installed copy (copy `config.example.toml` there and edit) - or any file named with `--config`,
 3. the command line (`.\run.cmd --help` lists everything; `start_ui.cmd` and the shortcuts pass no
    arguments, so for them `config.toml` is the place).
 
@@ -32,7 +32,7 @@ A misspelt key in `config.toml` is an error at start-up, not a silent default.
 | `fps` | `--fps` | `4.0` | Frames per second analysed and recorded. 4 lets the evaluator replay the sub-second rules faithfully; 2 halves the disk use. |
 | `frame_width` | - | `640` | Width of recorded frames in pixels (640x360 for a fullscreen 16:9 stream). The detector analyses at this width too. |
 | `jpeg_quality` | - | `75` | JPEG quality of recorded frames (~35 KB each at 75). |
-| `sessions_dir` | - | `"sessions"` | Where recordings go; relative to the project folder unless absolute. |
+| `sessions_dir` | - | `"sessions"` | Where recordings go; relative to the data folder (the project folder, or `%LOCALAPPDATA%\FootballAdBlocker` when installed) unless absolute. |
 
 Command line only:
 

@@ -1,0 +1,13 @@
+# What the installed copy's own Python gets (installer\build.ps1). The same pins as requirements.txt,
+# minus what only the tools\spike_*.py scripts need (dxcam, soundcard), with one lighter build of the
+# same version: PySide6-Essentials (QtCore, QtGui and QtWidgets are all the app uses - no WebEngine,
+# no Qt3D). Not opencv-python-headless: windows-capture depends on the full opencv-python, and the two
+# would install on top of each other. The unit tests run inside the staged Python before anything is
+# packaged. The image model (requirements-ml.txt) is installed on demand instead:
+# install_image_model.cmd in the installed folder, or the "Image model" component of the setup program.
+PySide6-Essentials==6.11.2
+opencv-python==5.0.0.93
+numpy==2.4.6
+windows-capture==2.0.1
+pycaw==20251023
+httpx==0.28.1

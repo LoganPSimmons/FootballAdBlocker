@@ -21,7 +21,7 @@ from adblock.detect.detector import AD, GAME
 from adblock.stats_widgets import BOTH, TeamComparison, TeamPanel, WinOddsChart, recent_plays, scoring_summary
 
 Qt = QtCore.Qt
-STATE_FILE = config_module.ROOT / "ui_state.json"  # last game picked, window position (git-ignored)
+STATE_FILE = config_module.DATA / "ui_state.json"  # last game picked, window position (git-ignored)
 PREVIEW_SIZE = (480, 270)
 COLOURS = {GAME: "#2e9f5b", AD: "#d2453d"}
 

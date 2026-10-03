@@ -1,0 +1,10 @@
+This copy of Football Ad Blocker was put here by its installer.
+
+Because this file exists next to the adblock folder, the app keeps everything it writes -
+config.toml, recordings (sessions), learned graphics, logs, ui_state.json - in
+
+    %LOCALAPPDATA%\FootballAdBlocker
+
+instead of next to the program (the Start menu has a shortcut to that folder). Delete this file
+to keep them next to the program instead, or set the environment variable
+FOOTBALL_AD_BLOCKER_DATA to put them anywhere else.

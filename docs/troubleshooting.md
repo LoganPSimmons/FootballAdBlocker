@@ -3,7 +3,9 @@
 The first place to look is always `logs\app.log` (the console shows the same when started with
 `run.cmd`), and for anything about *when* it hid or showed, the session's `timeline.jsonl`
 (`sessions\<date>_<label>\`): every state change carries its source (detector, a button, the
-hotkey), every ad-screen show/hide carries its reason.
+hotkey), every ad-screen show/hide carries its reason. Both are in the data folder: the project
+folder from a clone, `%LOCALAPPDATA%\FootballAdBlocker` for an installed copy (*Recordings and
+settings* in the Start menu).
 
 ## "Waiting for a Chrome window with 'YouTube TV|Fubo' in its title"
 
@@ -93,7 +95,8 @@ start, but after a kill from Task Manager or a power loss:
 
 ## The image model
 
-- *"Image model not installed (requirements-ml.txt): running on graphics only"* - install it; the
+- *"Image model not installed (requirements-ml.txt): running on graphics only"* - install it (an
+  installed copy: *Install the image model* in the Start menu); the
   app works without it but only the learned graphics decide then, which is not enough on every network.
 - *"image model could not be loaded"* in the log (and *could not be loaded* in the status line) -
   almost always a PyTorch build that does not match the GPU driver. Install the build

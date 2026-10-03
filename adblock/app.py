@@ -41,7 +41,7 @@ REATTACH_EVERY_S = 2.0
 REMUTE_EVERY_S = 2.0
 NO_FRAMES_S = 2.0  # no analysed frame for this long = the detector can't see the stream
 REMEMBER_EVERY_S = 300.0
-MEMORY_FILE = config_module.ROOT / "learned" / "graphics.npz"
+MEMORY_FILE = config_module.DATA / "learned" / "graphics.npz"
 APP_ID = "Logan.FootballAdBlocker"  # Windows taskbar identity; the shortcuts carry the same one
 
 log = logging.getLogger("adblock")
@@ -54,8 +54,8 @@ def say(message: str) -> None:
 
 def setup_logging() -> None:
     """Console when there is one, and always logs/app.log (pythonw has no console at all)."""
-    folder = config_module.ROOT / "logs"
-    folder.mkdir(exist_ok=True)
+    folder = config_module.DATA / "logs"
+    folder.mkdir(parents=True, exist_ok=True)
     handlers: list[logging.Handler] = [logging.handlers.RotatingFileHandler(folder / "app.log", maxBytes=1_000_000, backupCount=3, encoding="utf-8")]
     if sys.stdout is not None:
         handlers.append(logging.StreamHandler(sys.stdout))
@@ -562,6 +562,7 @@ def main(argv: list[str] | None = None) -> int:
 
     say(f"Football Ad Blocker {__version__}: {'automatic' if config.auto else 'manual'}; "
         f"{config.hotkey.upper()} = correct it / toggle, {config.quit_hotkey.upper()} = quit.")
+    say(f"Data folder (config.toml, recordings, learned graphics, log): {config_module.DATA}")
     if controller.writer:
         say(f"Recording to {controller.writer.dir}")
     if controller.stream is None:

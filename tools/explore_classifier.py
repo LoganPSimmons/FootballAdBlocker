@@ -34,8 +34,9 @@ import numpy as np  # noqa: E402
 from adblock.capture import FileReplaySource  # noqa: E402
 from adblock.detect.detector import Detector  # noqa: E402
 from adblock.labels import effective_labels  # noqa: E402
+from adblock.paths import DATA  # noqa: E402
 
-CACHE = ROOT / "learned" / "embeddings"
+CACHE = DATA / "learned" / "embeddings"
 MODEL, WEIGHTS = "ViT-B-32", "laion2b_s34b_b79k"
 BROADCAST_PROMPTS = [
     "a live American football game on television",
@@ -147,7 +148,7 @@ def main() -> int:
     model = model.to(device).eval()
     tokenizer = open_clip.get_tokenizer(MODEL)
 
-    sessions = args.sessions or sorted(p for p in (ROOT / "sessions").glob("*") if (p / "frames.csv").exists() and "smoke" not in p.name)
+    sessions = args.sessions or sorted(p for p in (DATA / "sessions").glob("*") if (p / "frames.csv").exists() and "smoke" not in p.name)
     data = {}
     for session in sessions:
         started = time.perf_counter()
@@ -200,7 +201,7 @@ def main() -> int:
 
     print("\n3. WHERE THE GRAPHICS DETECTOR IS BLIND: frames with no graphic on screen, scored against the viewer's corrected labels")
     for name, d in data.items():
-        session = ROOT / "sessions" / name
+        session = DATA / "sessions" / name
         source = FileReplaySource(session)
         if not any(e["event"] == "correction" for e in source.events()):
             continue
@@ -222,10 +223,10 @@ def main() -> int:
         truth, score = reference(d), probe(d)
         wrong = np.flatnonzero((truth != 0) & (np.sign(score) != truth))
         worst = wrong[np.argsort(-np.abs(score[wrong]))][:24]
-        source = FileReplaySource(ROOT / "sessions" / name)
+        source = FileReplaySource(DATA / "sessions" / name)
         tiles = []
         for i in worst:
-            tile = cv2.resize(cv2.imread(str(ROOT / "sessions" / name / source.rows[int(d["index"][i])]["file"])), (320, 180))
+            tile = cv2.resize(cv2.imread(str(DATA / "sessions" / name / source.rows[int(d["index"][i])]["file"])), (320, 180))
             text_ = f"{'BROADCAST' if truth[i] > 0 else 'AD'} scored {score[i]:+.2f} t={d['t'][i]:.0f}"
             cv2.putText(tile, text_, (5, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
             tiles.append(tile)

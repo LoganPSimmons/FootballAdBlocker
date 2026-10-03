@@ -34,6 +34,7 @@ import numpy as np  # noqa: E402
 
 from adblock.capture import FileReplaySource  # noqa: E402
 from adblock.labels import effective_labels  # noqa: E402
+from adblock.paths import DATA  # noqa: E402
 
 SILENT = 0.004  # peak-meter value that counts as silence
 SILENT_RUN = 3  # consecutive silent samples (~0.15 s at 20 Hz) that make a "dip"
@@ -232,7 +233,7 @@ def main() -> int:
     args = parser.parse_args()
     sessions = args.sessions
     if not sessions:
-        everything = sorted(p for p in (ROOT / "sessions").glob("*") if (p / "frames.csv").exists())
+        everything = sorted(p for p in (DATA / "sessions").glob("*") if (p / "frames.csv").exists())
         sessions = [p for p in everything if not FileReplaySource(p).unreliable_labels and len(FileReplaySource(p)) > 500]
         print(f"{len(sessions)} session(s) with trustworthy labels and more than 500 frames")
     audio = AudioLog(args.audio) if args.audio else None
