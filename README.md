@@ -42,9 +42,10 @@ are in [docs/how-it-works.md](docs/how-it-works.md).
 - **Windows 11** (Windows 10 version 2004 or later should work - the app needs Windows Graphics
   Capture and capture-excluded windows - but is untested). One or two monitors.
 - **Google Chrome** playing the stream, windowed or fullscreen. Tested with YouTube TV and Fubo;
-  another service only needs its window title added to a setting. Tested with Chrome's *Use
-  graphics acceleration when available* **switched off**; with it on, DRM-protected video may
-  capture as black frames - untested, and the first thing to check if the window's live view stays black.
+  another service only needs its window title added to a setting (or its window picked by hand
+  in the control window). Tested with Chrome's *Use graphics acceleration when available*
+  **switched off**; with it on, DRM-protected video may capture as black frames - untested, and
+  the first thing to check if the window's live view stays black.
 - **Python 3.11**, only to run it from source: the installer brings its own.
 - For the image model, strongly recommended: an **NVIDIA GPU** with a current driver (the pinned
   PyTorch build is CUDA 12.6; the model uses about 1 GB of VRAM and ~10 ms per frame). It runs on
@@ -94,10 +95,12 @@ menu and **Ctrl+Shift+F9**. Minimize it to get it out of the way while it works.
 | You'd rather trust the image model alone | Untick **Use learned graphics** (`graphics = false` in `config.toml` makes that the default) |
 | You'd rather toggle by hand | Untick **Hide ads automatically**: the detector keeps watching and logging, F9 toggles |
 | You want the numbers | **Game stats** in the window or the tray menu: win odds after every play, both teams side by side or one team's own stats and players, the scoring summary and the last plays |
+| It watches the wrong Chrome window, or none | Pick it under **Chrome window** in the window. *Automatic* takes the first window whose title names the stream; the list has every Chrome window, so a service the settings do not know works too |
 
-Pick the game in the window (remembered next time) and the ad screen shows its score, 45 s behind
-the feed on purpose so it never spoils a play; the stats screen on its right is held back the same
-way. In a small Chrome window only the timer, score and thumbnail fit.
+Pick the game in the window (type into the list to search it; remembered next time) and the ad
+screen shows its score, 45 s behind the feed on purpose so it never spoils a play; the stats
+screen on its right is held back the same way. In a small Chrome window only the timer, score
+and thumbnail fit.
 
 What to expect:
 

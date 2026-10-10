@@ -14,6 +14,19 @@ look at the tab: if the service's name is not in the title, add what is there to
 in `config.toml` (alternatives separated by `|`, case does not matter). Chrome must be a normal
 window - an app-mode or kiosk window has a different title; a second Chrome profile is fine.
 
+For one session, **Chrome window** in the control window does without the setting: the list has
+every Chrome window on screen, and a window picked there is watched whatever its title. It stays
+the stream while its title stays what it was when picked (or names a listed service), so
+switching it to another tab still pauses everything - the status line says so - and the choice
+lasts until that window closes.
+
+## It watches the wrong Chrome window
+
+Two Chrome windows showing the same service - the guide in one, the game in another - and
+*Automatic* takes the first title match, the biggest window first. Pick the right one under
+**Chrome window** in the control window (each entry shows the window's size, or *fullscreen*).
+The timeline's `capture` event names the window being watched, `window_choice` your pick.
+
 ## The window's live view stays black, or nothing is ever learned
 
 - The Chrome window shows another tab, or is minimized: the app only looks while the title matches,
@@ -108,9 +121,10 @@ start, but after a kill from Task Manager or a power loss:
 
 ## No score or stats on the ad screen
 
-Pick the game in the control window (or `--game <team>`); the list comes from ESPN's scoreboard
-for today. The score appears once it is 45 s old (the spoiler guard), so the first break of the
-session can be too early for it. "no game selected" on the ad screen means nothing was picked.
+Pick the game in the control window (the list has a search box - a team, a network, `live`; or
+start with `--game <team>`); the list is ESPN's scoreboard for today. The score appears once it
+is 45 s old (the spoiler guard), so the first break of the session can be too early for it. "no
+game selected" on the ad screen means nothing was picked.
 ESPN's API is unofficial: if it changes, `logs\app.log` shows the error and the rest of the app is
 unaffected.
 

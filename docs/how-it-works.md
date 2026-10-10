@@ -31,8 +31,9 @@ docstring explains the *why* of what it does, usually with the recorded moment t
   size plus video rectangle); every fullscreen size shares one library because it analyses to the
   same 640x360.
 - **Privacy guard**: frames are analysed and recorded only while the window's title names the
-  stream (`title_contains`). Another tab, a minimized window or a frozen picture means "can't tell",
-  which never hides anything.
+  stream (`title_contains`; for a window picked by hand in the control window, also the title it
+  had when picked). Another tab, a minimized window or a frozen picture means "can't tell", which
+  never hides anything.
 - **The ad screen is invisible to capture** (`WDA_EXCLUDEFROMCAPTURE`), so the detector always sees
   the stream underneath it, never its own stats screen.
 

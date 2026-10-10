@@ -145,13 +145,14 @@ class SessionWriter:
 class RecordingThread(threading.Thread):
     """Feeds a live source into a SessionWriter.
 
-    Privacy guard: a frame is only saved while the captured window's title still contains
-    ``title_contains`` - if that Chrome window is switched to another tab, recording pauses
+    Privacy guard: a frame is only saved while the captured window's title still names the
+    stream (``title_contains``: the setting, or the texts accepted for a window picked by hand -
+    ``win32.stream_titles``) - if that Chrome window is switched to another tab, recording pauses
     (and says so in the timeline) instead of saving whatever is on screen.
     """
 
     def __init__(self, source: FrameSource, writer: SessionWriter, get_state: Callable[[], str],
-                 hwnd: int, title_contains: str) -> None:
+                 hwnd: int, title_contains: str | tuple[str, ...]) -> None:
         super().__init__(name="recorder", daemon=True)
         self.source, self.writer, self.get_state = source, writer, get_state
         self.hwnd, self.title_contains = hwnd, title_contains

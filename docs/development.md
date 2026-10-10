@@ -66,7 +66,7 @@ the video once if it sits waiting. Its sessions are marked unreliable (below).
 | --- | --- |
 | `frames/000000.jpg …` | 640-px-wide JPEGs at ~4 fps (640x360 when the stream is fullscreen), ~35 KB each: roughly 1.5 GB for a 3.5 h game. `--fps 2` halves that. |
 | `frames.csv` | `index,t,wall,file,state,src_w,src_h` - `state` is GAME/AD when the frame was captured |
-| `timeline.jsonl` | one JSON object per line: `session_start`, `state` (with its source: detector, a button, the hotkey), **`correction`**, `hotkey`, `auto`, `graphics`, `overlay` (what it displayed), `overlay_visible` (shown/hidden and why), `window`, `capture`, `recording`, `game`, `relearn`, `session_end`. `t` is seconds since the session started; hotkey-driven events carry the key-press time, so sort by `t` rather than trusting file order. |
+| `timeline.jsonl` | one JSON object per line: `session_start`, `state` (with its source: detector, a button, the hotkey), **`correction`**, `hotkey`, `auto`, `graphics`, `overlay` (what it displayed), `overlay_visible` (shown/hidden and why), `window`, `capture`, `window_choice` (a Chrome window picked by hand, or back to automatic), `recording`, `game`, `relearn`, `session_end`. `t` is seconds since the session started; hotkey-driven events carry the key-press time, so sort by `t` rather than trusting file order. |
 | `detector.csv` | one row per analysed frame: `t,app_state,detector_state,game_like,override,auto,scores,scene,scene_score,black` |
 | `graphics/*.png` | what the detector had learned, saved whenever that changed |
 | `session.json` | the settings the session was recorded with |
@@ -165,7 +165,8 @@ changes and something stops working; their results on the development PC are in
 
 ## Adapting it
 
-- **Another streaming service**: add its window title to `title_contains`. Capture, muting and the
+- **Another streaming service**: add its window title to `title_contains` (for one session, picking
+  its window under *Chrome window* in the control window does the same). Capture, muting and the
   overlay do not care what plays in the window.
 - **Another network**: nothing to do - the graphics are learned, not configured.
 - **Another league or sport**: the image model's prompts (`BROADCAST_PROMPTS` / `AD_PROMPTS` in

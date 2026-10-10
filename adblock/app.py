@@ -89,7 +89,7 @@ class DetectorThread(threading.Thread):
     """Runs every captured frame through the detector. Like the recorder it never looks at
     the window while it shows another tab: that is reported as "can't see the stream"."""
 
-    def __init__(self, source: WgcWindowSource, detector: Detector, hwnd: int, title_contains: str, emit,
+    def __init__(self, source: WgcWindowSource, detector: Detector, hwnd: int, title_contains: str | tuple[str, ...], emit,
                  scene_opinion, quick_opinion) -> None:
         super().__init__(name="detector", daemon=True)
         self.source, self.detector, self.hwnd, self.title_contains, self.emit = source, detector, hwnd, title_contains, emit
@@ -124,6 +124,9 @@ class Controller(QtCore.QObject):
         self.break_started = 0.0
         self.stream: win32.WindowInfo | None = None
         self.source: WgcWindowSource | None = None
+        self.chosen_window = 0  # a Chrome window picked by hand in the control window (hwnd); 0 = the first title match
+        self.chosen_title = ""  # its title when picked: it stays the stream while its title still says this (stream_titles)
+        self.titles = win32.stream_titles(config.title_contains)  # what the watched window's title must contain
         self.observation: Observation | None = None
         self.observation_at = time.perf_counter()
         self.last_attach_try = self.last_remute = 0.0
@@ -188,26 +191,77 @@ class Controller(QtCore.QObject):
             self.writer.log(event, at, **fields)
 
     def attach(self) -> None:
-        stream = win32.find_stream_window(self.config.title_contains)
+        stream = self.find_stream()
         if stream is None:
             return
-        self.stream = stream
-        self.source = WgcWindowSource(stream.hwnd, min_interval_ms=max(50, int(1000 / self.config.fps) - 10))
+        self.titles = win32.stream_titles(self.config.title_contains, self.chosen_title if self.chosen_window else "")
+        try:
+            source = WgcWindowSource(stream.hwnd, min_interval_ms=max(50, int(1000 / self.config.fps) - 10))
+        except Exception as exc:  # Windows would not capture it: closing, hidden, or an odd window picked by hand
+            say(f"Can't capture Chrome window {stream.hwnd:#x} {stream.title!r}: {exc}")
+            if self.chosen_window:
+                self.chosen_window, self.chosen_title = 0, ""
+                self.log("window_choice", hwnd=0, reason="capture failed")
+            return
+        self.stream, self.source = stream, source
         if self.writer:
-            RecordingThread(self.source, self.writer, lambda: self.state, stream.hwnd, self.config.title_contains).start()
-        DetectorThread(self.source, self.detector, stream.hwnd, self.config.title_contains, self.observed.emit,
+            RecordingThread(self.source, self.writer, lambda: self.state, stream.hwnd, self.titles).start()
+        DetectorThread(self.source, self.detector, stream.hwnd, self.titles, self.observed.emit,
                        self.scene_opinion, self.quick_opinion).start()
         self.observation_at = time.perf_counter()
-        self.log("capture", status="acquired", hwnd=stream.hwnd, title=stream.title)
-        say(f"Watching Chrome window {stream.hwnd:#x}: {stream.title!r}")
+        self.log("capture", status="acquired", hwnd=stream.hwnd, title=stream.title, picked_by_hand=bool(self.chosen_window))
+        say(f"Watching Chrome window {stream.hwnd:#x}: {stream.title!r}" + (" (your pick)" if self.chosen_window else ""))
 
     def detach(self, reason: str) -> None:
         if self.source:
             self.source.stop()
         self.stream = self.source = self.last_geometry = None
         self.log("capture", status="lost", reason=reason)
-        say(f"Stream window lost ({reason}); waiting for it to come back.")
+        say("Switching Chrome window." if reason == "window choice" else f"Stream window lost ({reason}); waiting for it to come back.")
         self.set_state(GAME, "stream_lost")  # nothing left to cover; never leave Chrome muted
+
+    def find_stream(self) -> win32.WindowInfo | None:
+        """The window to watch: the one picked by hand while it still exists, else the first title match."""
+        if self.chosen_window:
+            if win32.is_window(self.chosen_window):
+                return win32.describe_window(self.chosen_window)
+            self.chosen_window, self.chosen_title = 0, ""
+            self.log("window_choice", hwnd=0, reason="window closed")
+            say("The Chrome window you picked is gone; choosing by title again.")
+        return win32.find_stream_window(self.config.title_contains)
+
+    def choose_window(self, hwnd: int) -> None:
+        """"Chrome window" in the control window. 0: automatic - the first window whose title names a
+        service in ``title_contains``, biggest first. Else that window, whatever its title: it is watched
+        while the title stays what it is now (or names a service), so switching it to another tab still
+        pauses analysis, recording and the ad screen, as always."""
+        if hwnd and not win32.is_window(hwnd):
+            hwnd = 0
+        self.chosen_window, self.chosen_title = hwnd, (win32.window_title(hwnd) if hwnd else "")
+        self.log("window_choice", hwnd=hwnd, title=self.chosen_title)
+        say(f"You picked Chrome window {hwnd:#x}: {self.chosen_title!r}" if hwnd else "Choosing the Chrome window by its title again.")
+        wanted = self.find_stream()
+        titles = win32.stream_titles(self.config.title_contains, self.chosen_title if self.chosen_window else "")
+        unchanged = self.stream is not None and wanted is not None and wanted.hwnd == self.stream.hwnd and titles == self.titles
+        if self.stream and not unchanged:
+            self.detach("window choice")
+        if self.stream is None:
+            self.last_attach_try = time.perf_counter()
+            self.attach()
+
+    def chrome_windows(self) -> list[tuple[int, str]]:
+        """Every Chrome window on screen as (hwnd, description) for the picker, title matches first."""
+        return [(w.hwnd, self.describe_window(w)) for w in win32.find_chrome_windows(self.config.title_contains)]
+
+    @staticmethod
+    def describe_window(w: win32.WindowInfo) -> str:
+        shape = ("minimized" if win32.is_minimized(w.hwnd) else "fullscreen" if win32.is_fullscreen(w.hwnd)
+                 else f"{w.width}x{w.height}")
+        return f"{win32.chrome_page_title(w.title)}   ·   {shape}"
+
+    def watched_window(self) -> str:
+        """The stream window as the picker describes it, or "" while there is none."""
+        return self.describe_window(win32.describe_window(self.stream.hwnd)) if self.stream else ""
 
     # --- what the viewer can do -------------------------------------------------------------
     def on_hotkey(self, action: str, pressed_at: float) -> None:
@@ -236,7 +290,7 @@ class Controller(QtCore.QObject):
 
     def stream_picture(self):
         """The newest frame of the stream for the image model - never of another tab."""
-        if not (self.source and self.stream) or not win32.title_matches(win32.window_title(self.stream.hwnd), self.config.title_contains):
+        if not (self.source and self.stream) or not win32.title_matches(win32.window_title(self.stream.hwnd), self.titles):
             return None
         frame = self.source.latest()
         return frame.image if frame is not None else None
@@ -367,7 +421,7 @@ class Controller(QtCore.QObject):
         hwnd = self.stream.hwnd
         if win32.is_minimized(hwnd):
             return "stream window is minimized"
-        if not win32.title_matches(win32.window_title(hwnd), self.config.title_contains):
+        if not win32.title_matches(win32.window_title(hwnd), self.titles):
             return "stream window shows another tab"
         in_front = win32.app_window_in_front(hwnd, ignore=(self.overlay.hwnd,))
         if in_front:  # exe only - other apps' window titles are none of the timeline's business
@@ -413,6 +467,9 @@ class Controller(QtCore.QObject):
         if seen is not None and seen.override:
             return f"You said {seen.override}. Holding that until the picture agrees, then automatic again."
         if seen is None or seen.video_rect is None:
+            if self.chosen_window and not win32.title_matches(title := win32.window_title(self.stream.hwnd), self.titles):
+                return (f"The Chrome window you picked is showing something else now ({win32.chrome_page_title(title)!r}): "
+                        "switch it back to the stream, pick it again, or add its service to title_contains.")
             return "Can't see the stream right now (other tab, minimized, or a new window size being learned)."
         mode = "Automatic" if self.auto else "Manual - the detector only watches"
         if not self.detector.use_graphics:

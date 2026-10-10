@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import ctypes
 import os
+import re
 from ctypes import wintypes
 from dataclasses import dataclass
+from typing import Iterable
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -264,11 +266,43 @@ def top_level_windows() -> list[int]:
     return hwnds
 
 
-def title_matches(title: str, title_contains: str | None) -> bool:
-    """Does the window title name the stream? ``title_contains`` lists alternatives separated
-    by ``|`` ("YouTube TV|Fubo"), matched case-insensitively; an empty setting matches nothing."""
-    needles = [part.strip().lower() for part in (title_contains or "").split("|") if part.strip()]
+CHROME_TITLE_SUFFIX = re.compile(r"\s+-\s+Google Chrome\b.*$")
+NOTIFICATION_COUNT = re.compile(r"^\(\d+\)\s*")
+
+
+def chrome_page_title(title: str) -> str:
+    """The page's own title out of a Chrome window title: "Home - YouTube TV - Google Chrome" ->
+    "Home - YouTube TV"; a notification count in front ("(2) ...") is dropped too."""
+    page = CHROME_TITLE_SUFFIX.sub("", NOTIFICATION_COUNT.sub("", title))
+    return page or title
+
+
+def title_needles(title_contains: str | None) -> list[str]:
+    """The alternatives in a ``title_contains`` setting ("YouTube TV|Fubo"), lower-case, blanks dropped."""
+    return [part.strip().lower() for part in (title_contains or "").split("|") if part.strip()]
+
+
+def title_matches(title: str, title_contains: str | Iterable[str] | None) -> bool:
+    """Does the window title name the stream? ``title_contains`` is the setting - alternatives
+    separated by ``|`` ("YouTube TV|Fubo") - or an already split list of texts (then ``|`` is an
+    ordinary character, as it can be inside a page title). Case-insensitive; an empty setting
+    matches nothing."""
+    if title_contains is None or isinstance(title_contains, str):
+        needles = title_needles(title_contains)
+    else:
+        needles = [needle.strip().lower() for needle in title_contains if needle.strip()]
     return any(needle in title.lower() for needle in needles)
+
+
+def stream_titles(title_contains: str | None, picked_title: str = "") -> tuple[str, ...]:
+    """What a window title must contain for the window to count as the stream: the services in
+    ``title_contains``, plus - for a window picked by hand that none of them names - the page title
+    it had when picked. So a hand-picked window of any service is watched, and switching it to
+    another tab still pauses analysis, recording and the ad screen."""
+    needles = title_needles(title_contains)
+    if picked_title and not title_matches(picked_title, needles):
+        needles.append(chrome_page_title(picked_title).lower())
+    return tuple(needles)
 
 
 def find_chrome_windows(title_contains: str | None = None) -> list[WindowInfo]:

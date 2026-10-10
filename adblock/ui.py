@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
+from typing import Callable
 
 import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -40,6 +42,13 @@ QPushButton:disabled { color: #56616e; background: #141a21; border-color: #222b3
 #sayAd:enabled { border-color: #d2453d; } #sayGame:enabled { border-color: #2e9f5b; }
 QComboBox { color: #e8edf2; background: #1b2530; border: 1px solid #3a4856; border-radius: 6px; padding: 6px; font: 14px 'Segoe UI'; }
 QComboBox QAbstractItemView { color: #e8edf2; background: #1b2530; selection-background-color: #26405a; }
+QLineEdit { color: #e8edf2; background: #121a22; border: 1px solid #3a4856; border-radius: 6px; padding: 6px; font: 14px 'Segoe UI'; }
+#searchPopup { background: #1b2530; border: 1px solid #3a4856; }
+#searchList { color: #e8edf2; background: #1b2530; border: none; font: 14px 'Segoe UI'; outline: 0; }
+#searchList::item { padding: 2px 8px; }
+#searchList::item:hover { background: #22303e; }
+#searchList::item:selected { background: #26405a; color: white; }
+#fieldLabel { color: #9fb0c3; }
 QTableWidget { color: #e8edf2; background: #121a22; alternate-background-color: #172029; border: 1px solid #2a3440;
                border-radius: 6px; font: 13px 'Segoe UI'; gridline-color: #2a3440; }
 QHeaderView::section { color: #9fb0c3; background: #1b2530; border: none; padding: 4px; font: 600 12px 'Segoe UI'; }
@@ -76,6 +85,182 @@ def dot_icon(colour: str) -> QtGui.QIcon:
     painter.drawEllipse(6, 6, 52, 52)
     painter.end()
     return QtGui.QIcon(pixmap)
+
+
+def field_label(text: str) -> QtWidgets.QLabel:
+    label = QtWidgets.QLabel(text)
+    label.setObjectName("fieldLabel")
+    return label
+
+
+SEARCH_ROLE = Qt.ItemDataRole.UserRole + 1  # more text an entry can be found by (the game's full name, say)
+
+
+class WordFilter(QtCore.QSortFilterProxyModel):
+    """Keeps the rows that contain every word typed, in any order, in their text or their SEARCH_ROLE text."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.words: list[str] = []
+
+    def set_words(self, text: str) -> None:
+        self.words = text.lower().split()
+        self.invalidateRowsFilter()
+
+    def filterAcceptsRow(self, row: int, parent: QtCore.QModelIndex) -> bool:  # noqa: N802 - Qt name
+        if not self.words:
+            return True
+        source = self.sourceModel()
+        index = source.index(row, 0, parent)
+        haystack = f"{source.data(index, Qt.ItemDataRole.DisplayRole) or ''} {source.data(index, SEARCH_ROLE) or ''}".lower()
+        return all(word in haystack for word in self.words)
+
+
+class PopupFrame(QtWidgets.QFrame):
+    """The list's own window; it remembers when it was last closed."""
+
+    def __init__(self, parent: QtWidgets.QWidget) -> None:
+        super().__init__(parent, Qt.WindowType.Popup)
+        self.hidden_at = 0.0
+
+    def hideEvent(self, event: QtGui.QHideEvent) -> None:  # noqa: N802 - Qt name
+        self.hidden_at = time.monotonic()
+        super().hideEvent(event)
+
+
+class SearchField(QtWidgets.QLineEdit):
+    """The search box; the keys that mean the list (arrows, Enter, Escape) are handed to its owner."""
+
+    def __init__(self, owner: "SearchableComboBox", parent: QtWidgets.QWidget) -> None:
+        super().__init__(parent)
+        self.owner = owner
+
+    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802 - Qt name
+        if not self.owner.list_key(event.key()):
+            super().keyPressEvent(event)
+
+
+class SearchableComboBox(QtWidgets.QComboBox):
+    """A combo box whose list opens with a search box on top. Type to narrow the list (every word must
+    occur somewhere in the entry), Up/Down to move, Enter or a click to pick, Escape to close; typing
+    into the closed box opens the list with that letter. The wheel never changes the pick by accident.
+    (No event filters: PySide6 calls a Python eventFilter for ChildAdded while the child is still being
+    built, which fails with a SystemError - hence the two small subclasses above.)"""
+
+    MAX_ROWS = 12
+
+    def __init__(self, placeholder: str = "Type to search") -> None:
+        super().__init__()
+        self.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.setMinimumContentsLength(20)
+        self.filter = WordFilter(self)
+        self.filter.setSourceModel(self.model())
+        self.popup = PopupFrame(self)
+        self.popup.setObjectName("searchPopup")
+        self.search = SearchField(self, self.popup)
+        self.search.setObjectName("search")
+        self.search.setPlaceholderText(placeholder)
+        self.search.setClearButtonEnabled(True)
+        self.search.textChanged.connect(self.narrow)
+        self.list = QtWidgets.QListView(self.popup)
+        self.list.setObjectName("searchList")
+        self.list.setModel(self.filter)
+        self.list.setUniformItemSizes(True)
+        self.list.setMouseTracking(True)
+        self.list.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.list.clicked.connect(self.pick)
+        box = QtWidgets.QVBoxLayout(self.popup)
+        box.setContentsMargins(6, 6, 6, 6)
+        box.setSpacing(6)
+        box.addWidget(self.search)
+        box.addWidget(self.list)
+
+    def showPopup(self) -> None:  # noqa: N802 - Qt name
+        if time.monotonic() - self.popup.hidden_at < 0.25:  # the click that just closed the list must not reopen it
+            return
+        self.search.clear()
+        self.narrow("")
+        row_height = self.list.sizeHintForRow(0) if self.filter.rowCount() else 28
+        height = self.search.sizeHint().height() + row_height * max(1, min(self.count(), self.MAX_ROWS)) + 2 * self.list.frameWidth() + 20
+        width = max(self.width(), 320)
+        below = self.mapToGlobal(QtCore.QPoint(0, self.height()))
+        area = (QtGui.QGuiApplication.screenAt(below) or self.screen()).availableGeometry()
+        y = below.y() if below.y() + height <= area.bottom() else self.mapToGlobal(QtCore.QPoint(0, 0)).y() - height
+        x = min(max(below.x(), area.left()), area.right() - width + 1)
+        self.popup.setGeometry(x, max(y, area.top()), width, height)
+        self.popup.show()
+        self.search.setFocus()
+
+    def hidePopup(self) -> None:  # noqa: N802 - Qt name
+        self.popup.hide()
+        super().hidePopup()
+
+    def narrow(self, text: str) -> None:
+        self.filter.set_words(text)
+        wanted = self.filter.index(0, 0) if text.strip() else self.filter.mapFromSource(self.model().index(self.currentIndex(), 0))
+        if not wanted.isValid() and self.filter.rowCount():
+            wanted = self.filter.index(0, 0)
+        self.list.setCurrentIndex(wanted)
+        if wanted.isValid():
+            self.list.scrollTo(wanted, QtWidgets.QAbstractItemView.ScrollHint.PositionAtCenter)
+
+    def move_highlight(self, step: int) -> None:
+        count = self.filter.rowCount()
+        if count:
+            row = max(0, min(count - 1, self.list.currentIndex().row() + step))
+            self.list.setCurrentIndex(self.filter.index(row, 0))
+            self.list.scrollTo(self.list.currentIndex())
+
+    def pick(self, index: QtCore.QModelIndex) -> None:
+        if not index.isValid():
+            return
+        row = self.filter.mapToSource(index).row()
+        self.hidePopup()
+        self.setCurrentIndex(row)
+        self.activated.emit(row)
+
+    def list_key(self, key: int) -> bool:
+        """A key pressed in the search box that the list answers; False when the box should keep it."""
+        steps = {Qt.Key.Key_Down: 1, Qt.Key.Key_Up: -1, Qt.Key.Key_PageDown: self.MAX_ROWS, Qt.Key.Key_PageUp: -self.MAX_ROWS}
+        if key in steps:
+            self.move_highlight(steps[key])
+        elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.pick(self.list.currentIndex())
+        elif key == Qt.Key.Key_Escape:
+            self.hidePopup()
+        else:
+            return False
+        return True
+
+    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802 - Qt name
+        text = event.text()
+        modifiers = Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier
+        if text.strip() and text.isprintable() and not event.modifiers() & modifiers:
+            self.showPopup()
+            self.search.setText(text)
+            return
+        super().keyPressEvent(event)
+
+    def wheelEvent(self, event: QtGui.QWheelEvent) -> None:  # noqa: N802 - Qt name
+        event.ignore()  # scrolling past the box must not change the pick
+
+
+class RefreshingComboBox(QtWidgets.QComboBox):
+    """A combo box whose entries are rebuilt every time its list opens, for things that come and go."""
+
+    def __init__(self, rebuild: Callable[[], None]) -> None:
+        super().__init__()
+        self.rebuild = rebuild
+        self.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.setMinimumContentsLength(20)
+
+    def showPopup(self) -> None:  # noqa: N802 - Qt name
+        self.rebuild()
+        super().showPopup()
+
+    def wheelEvent(self, event: QtGui.QWheelEvent) -> None:  # noqa: N802 - Qt name
+        event.ignore()
 
 
 class ControlWindow(QtWidgets.QWidget):
@@ -134,10 +319,24 @@ class ControlWindow(QtWidgets.QWidget):
         options.addWidget(self.pip, 0, 1)
         options.addWidget(self.graphics, 1, 0)
 
-        self.games = QtWidgets.QComboBox()
-        self.games.addItem("Score on the ad screen: none", ("", ""))
+        self.games = SearchableComboBox("Type to search: team, network, live / later / final")
+        self.games.setToolTip("Whose score and stats the ad screen shows - today's games from ESPN's scoreboard. "
+                              "Open the list and type to search it.")
+        self.games.addItem("none - the ad screen shows no score", ("", ""))
         self.games.activated.connect(self.pick_game)
         self.games_loaded.connect(self.fill_games)
+        self.windows = RefreshingComboBox(self.fill_windows)
+        self.windows.setToolTip("Which Chrome window is the stream. Automatic takes the first window whose title names a "
+                                "service (title_contains in config.toml); pick one yourself when there are several, or "
+                                "when the service is not listed - it is then watched while its title stays what it is now.")
+        self.windows.activated.connect(self.pick_window)
+        self.fill_windows()
+        pickers = QtWidgets.QGridLayout()
+        pickers.setColumnStretch(1, 1)
+        pickers.addWidget(field_label("Game"), 0, 0)
+        pickers.addWidget(self.games, 0, 1)
+        pickers.addWidget(field_label("Chrome window"), 1, 0)
+        pickers.addWidget(self.windows, 1, 1)
 
         self.session = QtWidgets.QLabel()
         self.session.setObjectName("session")
@@ -168,7 +367,7 @@ class ControlWindow(QtWidgets.QWidget):
         layout.addWidget(legend)
         layout.addLayout(corrections)
         layout.addLayout(options)
-        layout.addWidget(self.games)
+        layout.addLayout(pickers)
         layout.addWidget(self.session)
         layout.addLayout(footer)
         self.setFixedWidth(PREVIEW_SIZE[0] + 40)
@@ -223,6 +422,8 @@ class ControlWindow(QtWidgets.QWidget):
         for game in sorted(games, key=lambda g: (order.get(g.state, 3), g.short_name)):
             tag = {"in": "LIVE", "pre": "later", "post": "final"}.get(game.state, "")
             self.games.addItem(f"{game.short_name}   {game.network}   {tag}".strip(), (game.event_id, game.short_name))
+            self.games.setItemData(self.games.count() - 1, game.name, SEARCH_ROLE)  # "Utah State Aggies at Utah Utes"
+            self.games.setItemData(self.games.count() - 1, game.name, Qt.ItemDataRole.ToolTipRole)
         current = self.controller.scores.event_id if self.controller.scores else ""
         index = next((i for i in range(self.games.count()) if self.games.itemData(i)[0] == (current or self.wanted_event)), 0)
         self.games.setCurrentIndex(index)
@@ -233,6 +434,26 @@ class ControlWindow(QtWidgets.QWidget):
         event_id, label = self.games.itemData(index)
         self.controller.set_game("", event_id, label)
         save_state(event_id=event_id)
+
+    # --- Chrome window ---------------------------------------------------------------------------
+    def fill_windows(self) -> None:
+        """Rebuilt every time the list opens: Chrome windows come and go."""
+        chosen = self.controller.chosen_window
+        self.windows.clear()
+        self.windows.addItem(self.automatic_entry(), 0)
+        for hwnd, description in self.controller.chrome_windows():
+            self.windows.addItem(description, hwnd)
+        self.windows.setCurrentIndex(max(0, self.windows.findData(chosen)))
+
+    def automatic_entry(self) -> str:
+        c = self.controller
+        if c.chosen_window:
+            return "Automatic - the first window whose title names the stream"
+        watched = c.watched_window()
+        return f"Automatic: {watched}" if watched else f"Automatic: waiting for a window titled '{c.config.title_contains}'"
+
+    def pick_window(self, index: int) -> None:
+        self.controller.choose_window(self.windows.itemData(index) or 0)
 
     # --- live view ------------------------------------------------------------------------------
     def refresh(self) -> None:
@@ -254,6 +475,10 @@ class ControlWindow(QtWidgets.QWidget):
         where = c.writer.dir.name if c.writer else "not recording"
         frames = c.writer.frame_count if c.writer else 0
         self.session.setText(f"Recording: {where}   ·   {frames} frames   ·   {c.corrections} correction(s)")
+        self.windows.setItemText(0, self.automatic_entry())
+        wanted = max(0, self.windows.findData(c.chosen_window))  # back at "Automatic" once a picked window has closed
+        if self.windows.currentIndex() != wanted:
+            self.windows.setCurrentIndex(wanted)
         if self.isVisible():
             picture = c.preview()
             if picture is not None:

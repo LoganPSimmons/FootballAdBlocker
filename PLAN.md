@@ -14,7 +14,8 @@ FOX on YouTube TV (2026-09-19) and ABC/ESPN on YouTube TV, then FOX on Fubo (202
 "Second live day"). What is still ahead: a full hands-off game, the stats dashboard (Phase 2), the
 learned scene classifier (Phase 5) and polish (Phase 6). **2026-10-03:** the control window's option is
 now "Use learned graphics" (the image model is used whenever it is installed), measured below, and
-the repo has the docs it needs to be published (README, docs/, LICENSE, CONTRIBUTING).
+the repo has the docs it needs to be published (README, docs/, LICENSE, CONTRIBUTING). **2026-10-10:**
+the game list has a search box and the Chrome window can be picked by hand (section "Two pickers").
 
 ## Setup this is designed for
 
@@ -483,6 +484,27 @@ configuration, troubleshooting, development), CONTRIBUTING, an MIT LICENSE, a te
 a setting or flag is missing from the docs, and tools/preview_control_window.py to render the
 control window without the app running (the real one cannot be launched twice, and the ad screen
 cannot be screenshotted at all).
+
+## Two pickers: a searchable game list, a hand-picked Chrome window (2026-10-10)
+
+Logan asked for both. The game list (ESPN's whole FBS scoreboard for the day, 60-80 entries) now
+opens with a search box on top: every word typed must occur in the entry or in the game's full
+name, so "utah", "aggies" and "fox live" all find Utah State at Utah; Up/Down and Enter pick,
+typing into the closed box opens it with that letter, and the mouse wheel no longer changes the
+pick by accident (it used to change the shown game without applying it). It is the combo's own
+model behind a word filter (`SearchableComboBox` in ui.py); nothing else in the window changed.
+
+The **Chrome window** picker lists every Chrome window on screen (title matches first, each with
+its size or "fullscreen"), rebuilt every time it opens. *Automatic*, the default, is what the app
+always did: the first window whose title names a service in `title_contains`, biggest first -
+which on this PC would prefer a 2560-wide guide window on the ultrawide to the fullscreen game on
+the TV if both were open. A hand-picked window is watched whatever its title, with one rule kept
+from the privacy guard: it stays the stream while its title names a listed service *or* stays what
+it was when picked (the page title, "Home - YouTube TV", without Chrome's suffix), so switching it
+to another tab still pauses analysis, recording and the ad screen (`win32.stream_titles`). The
+choice lasts until that window closes, then it is automatic again; the timeline logs
+`window_choice`, and the status line says when the picked window's title has changed. Neither
+picker touches the detector, so there is nothing to measure.
 
 ## Phases
 
